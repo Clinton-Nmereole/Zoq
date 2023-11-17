@@ -1,7 +1,9 @@
 const std = @import("std");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
-var hashmap = std.StringHashMap([]const u8).init(allocator);
+const stringmap = std.StringHashMap(Expression);
+const map = std.AutoHashMap(Expression, Expression);
+const arraylist = std.ArrayList(Expression);
 
 //Declare a tagged union called an expression
 //An expression can be a symbol, a function.
@@ -55,6 +57,7 @@ pub const Expression = union(enum) {
         }
     }
 
+    // return true if the Expression is a function
     pub fn isFunction(self: Expression) bool {
         return switch (self) {
             .function => true,
@@ -62,6 +65,7 @@ pub const Expression = union(enum) {
         };
     }
 
+    // return true if the Expression is a symbol
     pub fn isSymbol(self: Expression) bool {
         return switch (self) {
             .symbol => true,
@@ -69,6 +73,7 @@ pub const Expression = union(enum) {
         };
     }
 
+    // return true if the two expressions are equal
     pub fn eql(self: Expression, other: Expression) bool {
         return switch (self) {
             .symbol => |s| switch (other) {
@@ -82,6 +87,7 @@ pub const Expression = union(enum) {
         };
     }
 
+    // return true if the two expression slices are equal
     pub fn eqlSlice(first: []const Expression, other: []const Expression) bool {
         if (first.len != other.len) return false;
         if (first.ptr == other.ptr) return true;
@@ -100,6 +106,18 @@ pub const Expression = union(enum) {
         return true;
     }
 
+    pub fn getlen(self: Expression) usize {
+        return switch (self) {
+            .symbol => |s| s.str.len,
+            .function => |f| f.args.len,
+        };
+    }
+
+    // return true if the two expressions are the same symbol, if they are functions then check if they have the same
+    // parent function name and number of arguments
+    // So add(g(c),f(d)) should still be a pattern of add(a,b)
+    // In this case add is the same parent function and has the same number of arguments
+    // So a would match to g(c) and b would match to f(d)
     pub fn isPattern(self: Expression, other: Expression) bool {
         return switch (self) {
             .symbol => |s| switch (other) {
@@ -112,7 +130,52 @@ pub const Expression = union(enum) {
             },
         };
     }
+
+    //put either a symbol or a function name in a hashmap
+    pub fn putinMap(self: Expression, other: Expression, amap: *stringmap) !void {
+        try switch (self) {
+            .symbol => |s| switch (other) {
+                .symbol => |_| if (!amap.contains(s.str)) {
+                    try amap.put(s.str, other);
+                } else {
+                    var entry = amap.get(s.str).?;
+                    if (!entry.eql(other)) {
+                        if (amap.remove(s.str)) {
+                            std.debug.print("NO MATCH\n", .{});
+                        }
+                    }
+                },
+                .function => |_| amap.put(s.str, other),
+            },
+            .function => |f| switch (other) {
+                .symbol => |_| amap.put(f.name, other),
+                .function => |_| {
+                    //try amap.put(f.name, other);
+                    for (f.args, other.function.args, 0..) |_, _, i| {
+                        try f.args[i].putinMap(other.function.args[i], amap);
+                    }
+                },
+            },
+        };
+    }
+
+    //Correctly pattern match variables if they pass the 'isPattern' condition.
+    pub fn patternMatch(self: Expression, other: Expression) !void {
+        var mymap = stringmap.init(allocator);
+        defer mymap.deinit();
+        if (self.isPattern(other)) {
+            try self.putinMap(other, &mymap);
+            var iter = mymap.iterator();
+            while (iter.next()) |entry| {
+                std.debug.print("{s} => {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+            }
+        } else {
+            std.debug.print("NO MATCH\n", .{});
+        }
+    }
 };
+
+pub const NoMatch = error{NO_MATCH};
 
 //A rule is a struct that has an expression and its equivalent
 //A rule enforces that the expression and equivalent are the same
@@ -140,6 +203,42 @@ pub const Rule = struct {
         try writer.print(" ≡ ", .{});
         try self.equivalent.format("", .{}, writer);
         try writer.print("\n", .{});
+    }
+
+    //Apply a rule to an expression
+    pub fn apply(self: Rule, expr: Expression) NoMatch!Expression {
+        if (self.expression.isPattern(expr)) {
+            var amap = stringmap.init(allocator);
+            defer amap.deinit();
+            var temp = self.equivalent.putinMap(expr, &amap) catch return NoMatch.NO_MATCH;
+            _ = temp;
+            var iter = amap.iterator();
+            //const arg_len = 3;
+            return switch (self.expression) {
+                .symbol => |_| switch (expr) {
+                    .symbol => |_| self.equivalent,
+                    .function => unreachable,
+                },
+                .function => |_| switch (expr) {
+                    .symbol => unreachable,
+                    .function => |_| {
+                        var arg_arr = [_]Expression{undefined} ** 2;
+                        var i: usize = 2 - 1;
+                        while (iter.next()) |entry| {
+                            arg_arr[i] = entry.value_ptr.*;
+                            if (i > 0) {
+                                i -= 1;
+                            }
+                        }
+
+                        var new_expr = Expression{ .function = .{ .name = self.equivalent.function.name, .args = &arg_arr } };
+
+                        return new_expr;
+                    },
+                },
+            };
+        }
+        return NoMatch.NO_MATCH;
     }
 };
 
@@ -229,24 +328,6 @@ pub fn main() !void {
     power_expr.print();
     expand_expr1.print();
 
-    // File stuff, read from a file and if the file is not empty make a new file and copy its content there
-    //This might later be used to read rules into a file.
-    {
-        var file = try std.fs.cwd().openFile("text.txt", .{});
-        defer file.close();
-        var buf: [1024]u8 = undefined;
-        const bytes_read = try file.read(buf[0..]);
-        var message = buf[0..bytes_read];
-        std.debug.print("{s}\n", .{message});
-
-        var new_file = try std.fs.cwd().createFile("text2.txt", .{});
-        defer new_file.close();
-        if (message.len > 0) {
-            _ = try new_file.write(message);
-        } else {
-            std.debug.print("empty file\n", .{});
-        }
-    }
     var add1 = Expression{ .function = .{ .name = "add", .args = &.{
         Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
         Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "d" } } } } },
@@ -254,9 +335,18 @@ pub fn main() !void {
     var add2 = Expression{ .function = .{ .name = "add", .args = &.{
         Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
     } } };
+    var add3 = Expression{ .function = .{ .name = "add", .args = &.{
+        Expression{ .symbol = .{ .str = "x" } }, Expression{ .symbol = .{ .str = "y" } },
+    } } };
 
     std.debug.print("add 1 is: {}, add 2 is: {}\n", .{ add1, add2 });
 
+    //testing isPattern
     std.debug.print("{}\n", .{add1.isPattern(add2)});
-    std.debug.print("{any}\n", .{add2.equivalentTo(addition_expr)});
+    var mymap = stringmap.init(allocator);
+    defer mymap.deinit();
+
+    //testing patternMatch
+    try add2.patternMatch(add1);
+    std.debug.print("{!}", .{addition_expr.apply(add3)});
 }
