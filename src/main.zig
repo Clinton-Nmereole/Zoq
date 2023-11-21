@@ -206,14 +206,14 @@ pub const Rule = struct {
     }
 
     //Apply a rule to an expression
-    pub fn apply(self: Rule, expr: Expression) NoMatch!Expression {
+    pub fn apply(self: Rule, expr: Expression) !Expression {
         if (self.expression.isPattern(expr)) {
             var amap = stringmap.init(allocator);
             defer amap.deinit();
-            var temp = self.equivalent.putinMap(expr, &amap) catch return NoMatch.NO_MATCH;
+            var temp = self.equivalent.putinMap(expr, &amap) catch return NoMatch.NO_MATCH; // this is a function that put inserts a (string, Expression) pair
             _ = temp;
-            var iter = amap.iterator();
-            //const arg_len = 3;
+            var iter = amap.iterator(); // make the map an iterator
+            const arg_len = self.equivalent.function.args.len;
             return switch (self.expression) {
                 .symbol => |_| switch (expr) {
                     .symbol => |_| self.equivalent,
@@ -222,21 +222,32 @@ pub const Rule = struct {
                 .function => |_| switch (expr) {
                     .symbol => unreachable,
                     .function => |_| {
-                        var arg_arr = [_]Expression{undefined} ** 2;
-                        var i: usize = 2 - 1;
+                        var arg_arr = allocator.alloc(Expression, arg_len) catch return NoMatch.NO_MATCH;
+                        var k = arg_len - 1;
                         while (iter.next()) |entry| {
-                            arg_arr[i] = entry.value_ptr.*;
-                            if (i > 0) {
-                                i -= 1;
+                            if (self.expression.isPattern(entry.value_ptr.*)) {
+                                arg_arr[k] = try self.apply(entry.value_ptr.*);
+                            } else {
+                                arg_arr[k] = entry.value_ptr.*;
+                            }
+                            //std.debug.print("{}\n", .{sub});
+
+                            if (k > 0) {
+                                k -= 1;
                             }
                         }
+                        const arg_slice = arg_arr[0..arg_len];
 
-                        var new_expr = Expression{ .function = .{ .name = self.equivalent.function.name, .args = &arg_arr } };
-
+                        var new_expr = Expression{ .function = .{ .name = self.equivalent.function.name, .args = arg_slice } };
                         return new_expr;
                     },
                 },
             };
+        }
+        for (expr.function.args) |arg| {
+            if (self.expression.isPattern(arg)) {
+                return try self.apply(arg);
+            }
         }
         return NoMatch.NO_MATCH;
     }
@@ -307,16 +318,6 @@ pub const expand_expr1 = Rule{
     } } },
 };
 
-pub const addition_expr1 = Rule{
-    .expression = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
-        Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "d" } } } } },
-    } } },
-};
-
 pub fn main() !void {
 
     //Print some of the rules defined
@@ -329,7 +330,7 @@ pub fn main() !void {
     expand_expr1.print();
 
     var add1 = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
+        Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
         Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "d" } } } } },
     } } };
     var add2 = Expression{ .function = .{ .name = "add", .args = &.{
@@ -338,6 +339,7 @@ pub fn main() !void {
     var add3 = Expression{ .function = .{ .name = "add", .args = &.{
         Expression{ .symbol = .{ .str = "x" } }, Expression{ .symbol = .{ .str = "y" } },
     } } };
+    _ = add3;
 
     std.debug.print("add 1 is: {}, add 2 is: {}\n", .{ add1, add2 });
 
@@ -346,7 +348,12 @@ pub fn main() !void {
     var mymap = stringmap.init(allocator);
     defer mymap.deinit();
 
-    //testing patternMatch
-    try add2.patternMatch(add1);
-    std.debug.print("{!}", .{addition_expr.apply(add3)});
+    var expr_array: [7]Expression = undefined;
+    _ = expr_array;
+
+    //try add2.patternMatch(add3);
+    //std.debug.print("{!}\n", .{addition_expr.apply(add3, &expr_array)});
+    std.debug.print("{!}\n", .{addition_expr.apply(add1)});
+    std.debug.print("{!}\n", .{multiply_expr.apply(add1)});
+    //std.debug.print("{!}\n", .{addition_expr.apply(add2, &expr_array)});
 }
