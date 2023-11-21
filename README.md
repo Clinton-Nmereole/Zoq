@@ -15,5 +15,5 @@ zig build run
 
 ## References
 Coq: [https://coq.inria.fr/](https://coq.inria.fr/)\
-Noq: [https://github.com/tsoding/Noq](https://github.com/tsoding/Noq)\
+Noq: [https://github.com/tsoding/Noq](https://github.com/tsoding/Noq)
 
