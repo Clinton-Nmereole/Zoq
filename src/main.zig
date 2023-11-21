@@ -318,6 +318,15 @@ pub const expand_expr1 = Rule{
     } } },
 };
 
+pub const addition2_expr = Rule{
+    .expression = Expression{ .function = .{ .name = "add", .args = &.{
+        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } }, Expression{ .symbol = .{ .str = "c" } },
+    } } },
+    .equivalent = Expression{ .function = .{ .name = "add", .args = &.{
+        Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } }, Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "0" } },
+    } } },
+};
+
 pub fn main() !void {
 
     //Print some of the rules defined
@@ -328,18 +337,18 @@ pub fn main() !void {
     square_expr.print();
     power_expr.print();
     expand_expr1.print();
+    addition2_expr.print();
 
     var add1 = Expression{ .function = .{ .name = "add", .args = &.{
         Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
-        Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "d" } } } } },
+        Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "d" } } } } },
     } } };
     var add2 = Expression{ .function = .{ .name = "add", .args = &.{
         Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
     } } };
     var add3 = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "x" } }, Expression{ .symbol = .{ .str = "y" } },
+        Expression{ .symbol = .{ .str = "x" } }, Expression{ .symbol = .{ .str = "y" } }, Expression{ .symbol = .{ .str = "z" } },
     } } };
-    _ = add3;
 
     std.debug.print("add 1 is: {}, add 2 is: {}\n", .{ add1, add2 });
 
@@ -348,12 +357,8 @@ pub fn main() !void {
     var mymap = stringmap.init(allocator);
     defer mymap.deinit();
 
-    var expr_array: [7]Expression = undefined;
-    _ = expr_array;
-
     //try add2.patternMatch(add3);
-    //std.debug.print("{!}\n", .{addition_expr.apply(add3, &expr_array)});
+    std.debug.print("{!}\n", .{addition2_expr.apply(add3)});
     std.debug.print("{!}\n", .{addition_expr.apply(add1)});
-    std.debug.print("{!}\n", .{multiply_expr.apply(add1)});
-    //std.debug.print("{!}\n", .{addition_expr.apply(add2, &expr_array)});
+    std.debug.print("{!}\n", .{addition_expr.apply(add2)});
 }
