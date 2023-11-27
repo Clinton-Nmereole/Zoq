@@ -2,8 +2,8 @@ const std = @import("std");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 const stringmap = std.StringHashMap(Expression);
-const map = std.AutoHashMap(Expression, Expression);
-const arraylist = std.ArrayList(Expression);
+
+pub const NoMatch = error{NO_MATCH};
 
 //Declare a tagged union called an expression
 //An expression can be a symbol, a function.
@@ -108,8 +108,8 @@ pub const Expression = union(enum) {
 
     pub fn getlen(self: Expression) usize {
         return switch (self) {
-            .symbol => |s| s.str.len,
-            .function => |f| f.args.len,
+            .symbol => 1,
+            .function => |f| f.args.len + 1,
         };
     }
 
@@ -133,7 +133,7 @@ pub const Expression = union(enum) {
 
     //put either a symbol or a function name in a hashmap
     pub fn putinMap(self: Expression, other: Expression, amap: *stringmap) !void {
-        try switch (self) {
+        return switch (self) {
             .symbol => |s| switch (other) {
                 .symbol => |_| if (!amap.contains(s.str)) {
                     try amap.put(s.str, other);
@@ -141,18 +141,40 @@ pub const Expression = union(enum) {
                     var entry = amap.get(s.str).?;
                     if (!entry.eql(other)) {
                         if (amap.remove(s.str)) {
-                            std.debug.print("NO MATCH\n", .{});
+                            return error.NoMatch;
                         }
                     }
                 },
-                .function => |_| amap.put(s.str, other),
+                .function => |_| if (!amap.contains(s.str)) {
+                    try amap.put(s.str, other);
+                } else {
+                    var entry = amap.get(s.str).?;
+                    if (!entry.eql(other)) {
+                        if (amap.remove(s.str)) {
+                            return error.NoMatch;
+                        }
+                    }
+                },
             },
             .function => |f| switch (other) {
-                .symbol => |_| amap.put(f.name, other),
+                .symbol => |_| if (!amap.contains(f.name)) {
+                    try amap.put(f.name, other);
+                } else {
+                    var entry = amap.get(f.name).?;
+                    if (!entry.eql(other)) {
+                        if (amap.remove(f.name)) {
+                            return error.NoMatch;
+                        }
+                    }
+                },
                 .function => |_| {
                     //try amap.put(f.name, other);
-                    for (f.args, other.function.args, 0..) |_, _, i| {
-                        try f.args[i].putinMap(other.function.args[i], amap);
+                    if (f.args.len == other.function.args.len) {
+                        for (f.args, other.function.args, 0..) |_, _, i| {
+                            try f.args[i].putinMap(other.function.args[i], amap);
+                        }
+                    } else {
+                        return error.NoMatch;
                     }
                 },
             },
@@ -174,8 +196,6 @@ pub const Expression = union(enum) {
         }
     }
 };
-
-pub const NoMatch = error{NO_MATCH};
 
 //A rule is a struct that has an expression and its equivalent
 //A rule enforces that the expression and equivalent are the same
@@ -253,112 +273,91 @@ pub const Rule = struct {
     }
 };
 
+//TODO: Implement a parser and lexer
+pub const Tokenkind = union(enum) {
+    symbol: Expression.symbol,
+    OpenParen: void,
+    CloseParen: void,
+    Comma: void,
+    Equals: void,
+};
+
+pub const Token = struct {
+    kind: Tokenkind,
+    str: []const u8,
+};
+
+pub fn sym(comptime symbol_name: []const u8) Expression {
+    return Expression{ .symbol = .{ .str = symbol_name } };
+}
+
+pub fn fun(comptime name: []const u8, comptime args: []const Expression) Expression {
+    return Expression{ .function = .{ .name = name, .args = args } };
+}
+
 //Some mathematical rules declarations
 pub const swap_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "swap", .args = &.{
-        Expression{ .function = .{ .name = "pair", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "pair", .args = &.{ Expression{ .symbol = .{ .str = "b" } }, Expression{ .symbol = .{ .str = "a" } } } } },
+    .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
+    .equivalent = fun("pair", &.{ sym("b"), sym("a") }),
 };
 
 pub const addition_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "b" } }, Expression{ .symbol = .{ .str = "a" } },
-    } } },
+    .expression = fun("add", &.{ sym("a"), sym("b") }),
+    .equivalent = fun("add", &.{ sym("b"), sym("a") }),
 };
 
 pub const multiply_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "mult", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "mult", .args = &.{
-        Expression{ .symbol = .{ .str = "b" } }, Expression{ .symbol = .{ .str = "a" } },
-    } } },
+    .expression = fun("mult", &.{ sym("a"), sym("b") }),
+    .equivalent = fun("mult", &.{ sym("b"), sym("a") }),
 };
 
 pub const division_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "div", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "mult", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "1/b" } },
-    } } },
+    .expression = fun("div", &.{ sym("a"), sym("b") }),
+    .equivalent = fun("mult", &.{ sym("a"), sym("1/b") }),
 };
 
 pub const square_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "square", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "mult", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "a" } },
-    } } },
+    .expression = fun("square", &.{sym("a")}),
+    .equivalent = fun("mult", &.{ sym("a"), sym("a") }),
 };
 
 pub const power_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "power", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "n" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "mult", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .function = .{ .name = "power", .args = &.{
-            Expression{ .symbol = .{ .str = "a" } },
-            Expression{ .symbol = .{ .str = "n-1" } },
-        } } },
-    } } },
-};
-
-pub const expand_expr1 = Rule{
-    .expression = Expression{ .function = .{ .name = "expand", .args = &.{
-        Expression{ .function = .{ .name = "mult", .args = &.{ Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } }, Expression{ .symbol = .{ .str = "c" } } } } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "ac" } }, Expression{ .symbol = .{ .str = "bc" } },
-    } } },
-};
-
-pub const addition2_expr = Rule{
-    .expression = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } }, Expression{ .symbol = .{ .str = "c" } },
-    } } },
-    .equivalent = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } }, Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "0" } },
-    } } },
+    .expression = fun("power", &.{ sym("a"), sym("n") }),
+    .equivalent = fun("mult", &.{ sym("a"), fun("power", &.{ sym("a"), sym("n-1") }) }),
 };
 
 pub fn main() !void {
-
-    //Print some of the rules defined
-    swap_expr.print();
-    addition_expr.print();
-    multiply_expr.print();
-    division_expr.print();
-    square_expr.print();
-    power_expr.print();
-    expand_expr1.print();
-    addition2_expr.print();
-
-    var add1 = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } } } } },
-        Expression{ .function = .{ .name = "add", .args = &.{ Expression{ .symbol = .{ .str = "c" } }, Expression{ .symbol = .{ .str = "d" } } } } },
-    } } };
-    var add2 = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "a" } }, Expression{ .symbol = .{ .str = "b" } },
-    } } };
-    var add3 = Expression{ .function = .{ .name = "add", .args = &.{
-        Expression{ .symbol = .{ .str = "x" } }, Expression{ .symbol = .{ .str = "y" } }, Expression{ .symbol = .{ .str = "z" } },
-    } } };
-
-    std.debug.print("add 1 is: {}, add 2 is: {}\n", .{ add1, add2 });
-
-    //testing isPattern
-    std.debug.print("{}\n", .{add1.isPattern(add2)});
+    std.debug.print("{!}\n", .{addition_expr.apply(fun("add", &.{ sym("x"), sym("y") }))});
     var mymap = stringmap.init(allocator);
     defer mymap.deinit();
+    const expr1 = fun("add", &.{ sym("x"), sym("y") });
+    const expr2 = fun("add", &.{ sym("a"), sym("b") });
+    try expr1.putinMap(expr2, &mymap);
+    std.debug.print("{any}\n", .{@TypeOf(mymap.get("x"))});
+}
 
-    //try add2.patternMatch(add3);
-    std.debug.print("{!}\n", .{addition2_expr.apply(add3)});
-    std.debug.print("{!}\n", .{addition_expr.apply(add1)});
-    std.debug.print("{!}\n", .{addition_expr.apply(add2)});
+test "Symbol Equality" {
+    try std.testing.expectEqual(sym("a"), sym("a"));
+}
+
+test "isPattern Function" {
+    try std.testing.expect(fun("add", &.{ sym("x"), sym("y") }).isPattern(fun("add", &.{ sym("y"), sym("x") })) == true);
+}
+
+test "putinmap Function" {
+    var mymap = stringmap.init(std.testing.allocator);
+    defer mymap.deinit();
+    const expr1 = fun("add", &.{ sym("x"), sym("y") });
+    const expr2 = fun("add", &.{ sym("a"), sym("b") });
+    try expr1.putinMap(expr2, &mymap);
+    try std.testing.expect(mymap.count() == 2);
+    try std.testing.expectEqual(mymap.get("x"), expr2.function.args[0]);
+    try std.testing.expectEqual(mymap.get("y"), expr2.function.args[1]);
+}
+
+test "Rule apply" {
+    var expr1 = fun("add", &.{ sym("x"), sym("y") });
+    var expr2 = fun("add", &.{ sym("y"), sym("x") });
+    var expr3 = try addition_expr.apply(expr1);
+    try std.testing.expect(expr3.eql(expr2) == true);
 }
