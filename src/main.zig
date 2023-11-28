@@ -2,6 +2,7 @@ const std = @import("std");
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 const stringmap = std.StringHashMap(Expression);
+const tokenize = std.mem.tokenizeAny;
 
 pub const NoMatch = error{NO_MATCH};
 
@@ -141,7 +142,7 @@ pub const Expression = union(enum) {
                     var entry = amap.get(s.str).?;
                     if (!entry.eql(other)) {
                         if (amap.remove(s.str)) {
-                            return error.NoMatch;
+                            return NoMatch.NO_MATCH;
                         }
                     }
                 },
@@ -151,7 +152,7 @@ pub const Expression = union(enum) {
                     var entry = amap.get(s.str).?;
                     if (!entry.eql(other)) {
                         if (amap.remove(s.str)) {
-                            return error.NoMatch;
+                            return NoMatch.NO_MATCH;
                         }
                     }
                 },
@@ -163,7 +164,7 @@ pub const Expression = union(enum) {
                     var entry = amap.get(f.name).?;
                     if (!entry.eql(other)) {
                         if (amap.remove(f.name)) {
-                            return error.NoMatch;
+                            return NoMatch.NO_MATCH;
                         }
                     }
                 },
@@ -174,7 +175,7 @@ pub const Expression = union(enum) {
                             try f.args[i].putinMap(other.function.args[i], amap);
                         }
                     } else {
-                        return error.NoMatch;
+                        return NoMatch.NO_MATCH;
                     }
                 },
             },
@@ -192,10 +193,47 @@ pub const Expression = union(enum) {
                 std.debug.print("{s} => {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
             }
         } else {
-            std.debug.print("NO MATCH\n", .{});
+            return NoMatch.NO_MATCH;
         }
     }
 };
+
+pub inline fn sym(comptime symbol_name: []const u8) Expression {
+    return Expression{ .symbol = .{ .str = symbol_name } };
+}
+
+pub inline fn fun(comptime name: []const u8, comptime args: []const Expression) Expression {
+    return Expression{ .function = .{ .name = name, .args = args } };
+}
+
+pub inline fn exprmk(comptime input: []const u8) Expression {
+    switch (input.len) {
+        0 => return Expression{ .symbol = .{ .str = "" } },
+        1 => return sym(input),
+        else => return Expression{ .function = .{ .name = input, .args = &[_]Expression{} } },
+    }
+}
+
+pub inline fn parsetxt(comptime input: []const u8) []const u8 {
+    var start: usize = 1000;
+    var end: usize = 0;
+    for (input, 0..) |c, i| {
+        if (c == '(' and i < start) {
+            start = i + 1;
+        }
+        if (c == ')') {
+            end = i;
+        }
+    }
+    var inner = input[start..end];
+    return inner;
+}
+
+pub inline fn token_parsetxt(comptime input: []const u8) std.mem.TokenIterator(u8, .any) {
+    var parsedtxt = parsetxt(input);
+    var tokens = tokenize(u8, parsedtxt, ", ");
+    return tokens;
+}
 
 //A rule is a struct that has an expression and its equivalent
 //A rule enforces that the expression and equivalent are the same
@@ -287,14 +325,6 @@ pub const Token = struct {
     str: []const u8,
 };
 
-pub fn sym(comptime symbol_name: []const u8) Expression {
-    return Expression{ .symbol = .{ .str = symbol_name } };
-}
-
-pub fn fun(comptime name: []const u8, comptime args: []const Expression) Expression {
-    return Expression{ .function = .{ .name = name, .args = args } };
-}
-
 //Some mathematical rules declarations
 pub const swap_expr = Rule{
     .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
@@ -333,7 +363,19 @@ pub fn main() !void {
     const expr1 = fun("add", &.{ sym("x"), sym("y") });
     const expr2 = fun("add", &.{ sym("a"), sym("b") });
     try expr1.putinMap(expr2, &mymap);
-    std.debug.print("{any}\n", .{@TypeOf(mymap.get("x"))});
+
+    var splitter = tokenize(u8, "add(g(c, k), f(d))", "(), ");
+    while (splitter.next()) |token| {
+        std.debug.print("{s}\n", .{token});
+    }
+    var myslice = &[_]u8{undefined};
+    var mytokeniter = token_parsetxt("add(f(x), f(y))");
+    var counter: usize = 0;
+    while (mytokeniter.next()) |token| {
+        myslice[counter] = token;
+        std.debug.print("{s}\n", .{token});
+        counter += 1;
+    }
 }
 
 test "Symbol Equality" {
