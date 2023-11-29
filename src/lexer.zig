@@ -16,6 +16,7 @@ pub const whitespace_chars: []const u8 = &[_]u8{
 pub const identifier_characters: []const u8 =
     "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ++
     "abcdefghijklmnopqrstuvwxyz" ++
+    "0123456789" ++
     "_" //
 ;
 
@@ -36,12 +37,74 @@ pub inline fn eqlComptime(comptime T: type, comptime a: []const T, comptime b: [
     comptime return @reduce(.And, @as(V, a[0..].*) == @as(V, b[0..].*));
 }
 
+//this takes in a type T and an array of anytype and returns a constant pointer to the array (a slice)
+pub inline fn scalarSlice(
+    comptime T: type,
+    comptime array: anytype,
+) *const [array.len]T {
+    return &array;
+}
+
+pub fn indexOfNonePosComptime(
+    comptime T: type,
+    comptime haystack: anytype,
+    comptime start: comptime_int,
+    comptime excluded: anytype,
+) ?comptime_int {
+    if (@TypeOf(haystack) != [haystack.len]T) unreachable;
+    const offs = indexOfNoneComptime(T, haystack[start..].*, excluded) orelse
+        return null;
+    return start + offs;
+}
+
+//this takes in a type T, and a haystack and excluded of types anytype and returns an optional comptime_int.
+pub fn indexOfNoneComptime(
+    comptime T: type,
+    comptime haystack: anytype,
+    comptime excluded: anytype,
+) ?comptime_int {
+    if (@TypeOf(haystack) != [haystack.len]T) unreachable;
+    if (@TypeOf(excluded) != [excluded.len]T) unreachable;
+    if (excluded.len == 0) unreachable;
+
+    if (haystack.len == 0) return null;
+
+    const len = haystack.len;
+
+    var mask_bit_vec: @Vector(len, u1) = [_]u1{@intFromBool(true)} ** len;
+    @setEvalBranchQuota(@min(std.math.maxInt(u32), (excluded.len + 1) * 100));
+    for (excluded) |ex| {
+        const ex_vec: @Vector(len, T) = @splat(ex);
+        const match_bits: @Vector(len, u1) = @bitCast(haystack != ex_vec);
+        mask_bit_vec &= match_bits;
+    }
+
+    const mask: std.meta.Int(.unsigned, len) = @bitCast(mask_bit_vec);
+    const idx = @ctz(mask);
+    return if (idx == haystack.len) null else idx;
+}
+
+pub inline fn containsScalarComptime(
+    comptime T: type,
+    comptime haystack: anytype,
+    comptime needle: T,
+) bool {
+    comptime {
+        if (@TypeOf(haystack) != [haystack.len]T) unreachable;
+        const needle_vec: @Vector(haystack.len, T) = @splat(needle);
+        const matches = haystack == needle_vec;
+        return @reduce(.Or, matches);
+    }
+}
+
 //TODO: Implement a parser
 pub const Token = union(enum) {
     identifier: []const u8,
+    number: []const u8,
     openParen,
     closeParen,
     comma,
+    eof: enum(comptime_int) {},
 
     err: Err,
 
@@ -53,31 +116,146 @@ pub const Token = union(enum) {
         comptime if (std.meta.activeTag(this) != other) return false;
 
         return switch (this) {
-            .comma, .openParen, .closeParen => true,
-            inline .identifier => |str, tag| eqlComptime(u8, str, @field(other, @tagName(tag))),
+            .comma, .openParen, .closeParen, .eof => true,
+            inline .identifier, .number => |str, tag| eqlComptime(u8, str, @field(other, @tagName(tag))),
             .err => |err| err == other.err,
         };
     }
 
     pub inline fn format(
         comptime self: Token,
-        comptime fmt: []const u8,
+        comptime fmt_str: []const u8,
         options: std.fmt.FormatOptions,
         writer: anytype,
     ) @TypeOf(writer).Error!void {
         _ = options;
-        if (fmt.len != 0) comptime {
-            std.fmt.invalidFmtError(fmt, self);
+        if (fmt_str.len != 0) comptime {
+            std.fmt.invalidFmtError(fmt_str, self);
         };
         switch (self) {
-            inline .identifier => |str, tag| try writer.writeAll(comptime std.fmt.comptimePrint("{s}({s})", .{ @tagName(tag), str })),
-            .comma, .openParen, .closeParen => try writer.writeAll(@tagName(self)),
+            inline .identifier, .number => |str, tag| try writer.writeAll(comptime std.fmt.comptimePrint("{s}({s})", .{ @tagName(tag), str })),
+            .comma, .openParen, .closeParen, .eof => try writer.writeAll(@tagName(self)),
             .err => |err| try writer.writeAll(comptime std.fmt.comptimePrint("{s}({s})", .{ @tagName(self), @tagName(err) })),
         }
     }
 };
 
-test "tokenizer" {
+const PeekResult = struct {
+    state: Lexer,
+    token: Token,
+};
+
+fn peekImpl(
+    comptime lexer_init: Lexer,
+    comptime buffer: []const u8,
+) PeekResult {
+    if (!@inComptime()) comptime unreachable;
+    const lexer = blk: {
+        var lexer = lexer_init;
+        switch ((buffer ++ [_:0]u8{})[lexer.index]) {
+            ' ', '\t', '\n', '\r', std.ascii.control_code.vt, std.ascii.control_code.ff => {
+                const whitespace_end = indexOfNonePosComptime(u8, buffer[0..].*, lexer.index + 1, whitespace_chars[0..].*) orelse buffer.len;
+                lexer.index = whitespace_end;
+            },
+            else => {},
+        }
+        break :blk lexer;
+    };
+    switch ((buffer ++ &[_:0]u8{})[lexer.index]) {
+        0 => |sentinel| {
+            if (lexer_init.index != buffer.len) return .{
+                .state = .{ .index = lexer.index + 1 },
+                .token = .{ .err = .{ .unexpected_byte = sentinel } },
+            };
+            return .{
+                .state = lexer,
+                .token = .eof,
+            };
+        },
+
+        ' ',
+        '\t',
+        '\n',
+        '\r',
+        std.ascii.control_code.vt,
+        std.ascii.control_code.ff,
+        => unreachable,
+
+        ',', '(', ')', '[', ']' => |char| return .{
+            .state = .{ .index = lexer.index + 1 },
+            .token = switch (char) {
+                ',' => .comma,
+                '(' => .openParen,
+                ')' => .closeParen,
+                else => unreachable,
+            },
+        },
+
+        'a'...'z',
+        'A'...'Z',
+        '_',
+        => {
+            const start = lexer.index;
+            const end = indexOfNonePosComptime(u8, buffer[0..].*, start + 1, identifier_characters[0..].*) orelse buffer.len;
+            const ident = scalarSlice(u8, buffer[start..end].*);
+            return .{
+                .state = .{ .index = end },
+                .token = .{ .identifier = ident },
+            };
+        },
+        '0'...'9' => {
+            const start = lexer.index;
+            @setEvalBranchQuota(@min(std.math.maxInt(u32), (buffer.len - start) * 100));
+            var zig_lexer = std.zig.Tokenizer.init(buffer[start..] ++ &[_:0]u8{});
+            const zig_tok = zig_lexer.next();
+
+            if (zig_tok.loc.start != 0) unreachable;
+            const literal_src = scalarSlice(u8, buffer[start..][zig_tok.loc.start..zig_tok.loc.end].*);
+
+            return .{
+                .state = .{ .index = start + literal_src.len },
+                .token = .{ .number = literal_src },
+            };
+        },
+        else => |char| return .{
+            .state = .{ .index = lexer.index + 1 },
+            .token = .{ .err = .{ .Unexpectedbyte = char } },
+        },
+    }
+    return null;
+}
+
+pub inline fn next(
+    comptime lexer: *Lexer,
+    comptime buffer: []const u8,
+) Token {
+    comptime {
+        const result = lexer.peekImpl(scalarSlice(u8, buffer[0..].*));
+        lexer.* = result.state;
+        return result.token;
+    }
+}
+
+fn testLexer(
+    comptime buffer: []const u8,
+    comptime expected: []const Token,
+) !void {
+    comptime var lexer = Lexer{};
+    inline for (expected) |expected_token| {
+        const actual_token = lexer.next(buffer);
+        comptime if (actual_token.eql(expected_token)) continue;
+        std.log.err("Expected '{}', got '{}'", .{ expected_token, actual_token });
+        return error.TestExpectedEqual;
+    }
+    const expected_token: Token = .eof;
+    const actual_token = lexer.next(buffer);
+    if (!expected_token.eql(actual_token)) {
+        std.log.err("Expected '{}', got '{}'", .{ expected_token, actual_token });
+        return error.TestExpectedEqual;
+    }
+}
+
+test "lexer" {
     const mytoken = Token{
         .identifier = "test",
     };
@@ -89,4 +267,52 @@ test "tokenizer" {
     };
     try std.testing.expect(mytoken.eql(mytoken2) == true);
     try std.testing.expect(mytoken.eql(mytoken3) == false);
+}
+
+test Lexer {
+    try testLexer("add(a,b)", &.{
+        .{ .identifier = "add" },
+        .openParen,
+        .{ .identifier = "a" },
+        .comma,
+        .{ .identifier = "b" },
+        .closeParen,
+    });
+
+    try testLexer("mult(a, b)", &.{
+        .{ .identifier = "mult" },
+        .openParen,
+        .{ .identifier = "a" },
+        .comma,
+        .{ .identifier = "b" },
+        .closeParen,
+    });
+
+    try testLexer("div(f(a), b)", &.{
+        .{ .identifier = "div" },
+        .openParen,
+        .{ .identifier = "f" },
+        .openParen,
+        .{ .identifier = "a" },
+        .closeParen,
+        .comma,
+        .{ .identifier = "b" },
+        .closeParen,
+    });
+
+    try testLexer("square(a)", &.{
+        .{ .identifier = "square" },
+        .openParen,
+        .{ .identifier = "a" },
+        .closeParen,
+    });
+
+    try testLexer("power(a, 2)", &.{
+        .{ .identifier = "power" },
+        .openParen,
+        .{ .identifier = "a" },
+        .comma,
+        .{ .number = "2" },
+        .closeParen,
+    });
 }
