@@ -206,35 +206,6 @@ pub inline fn fun(comptime name: []const u8, comptime args: []const Expression) 
     return Expression{ .function = .{ .name = name, .args = args } };
 }
 
-pub inline fn exprmk(comptime input: []const u8) Expression {
-    switch (input.len) {
-        0 => return Expression{ .symbol = .{ .str = "" } },
-        1 => return sym(input),
-        else => return Expression{ .function = .{ .name = input, .args = &[_]Expression{} } },
-    }
-}
-
-pub inline fn parsetxt(comptime input: []const u8) []const u8 {
-    var start: usize = 1000;
-    var end: usize = 0;
-    for (input, 0..) |c, i| {
-        if (c == '(' and i < start) {
-            start = i + 1;
-        }
-        if (c == ')') {
-            end = i;
-        }
-    }
-    var inner = input[start..end];
-    return inner;
-}
-
-pub inline fn token_parsetxt(comptime input: []const u8) std.mem.TokenIterator(u8, .any) {
-    var parsedtxt = parsetxt(input);
-    var tokens = tokenize(u8, parsedtxt, ", ");
-    return tokens;
-}
-
 //A rule is a struct that has an expression and its equivalent
 //A rule enforces that the expression and equivalent are the same
 //i.e a + b ≡ b + a
@@ -311,20 +282,6 @@ pub const Rule = struct {
     }
 };
 
-//TODO: Implement a parser and lexer
-pub const Tokenkind = union(enum) {
-    symbol: Expression.symbol,
-    OpenParen: void,
-    CloseParen: void,
-    Comma: void,
-    Equals: void,
-};
-
-pub const Token = struct {
-    kind: Tokenkind,
-    str: []const u8,
-};
-
 //Some mathematical rules declarations
 pub const swap_expr = Rule{
     .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
@@ -363,19 +320,6 @@ pub fn main() !void {
     const expr1 = fun("add", &.{ sym("x"), sym("y") });
     const expr2 = fun("add", &.{ sym("a"), sym("b") });
     try expr1.putinMap(expr2, &mymap);
-
-    var splitter = tokenize(u8, "add(g(c, k), f(d))", "(), ");
-    while (splitter.next()) |token| {
-        std.debug.print("{s}\n", .{token});
-    }
-    var myslice = &[_]u8{undefined};
-    var mytokeniter = token_parsetxt("add(f(x), f(y))");
-    var counter: usize = 0;
-    while (mytokeniter.next()) |token| {
-        myslice[counter] = token;
-        std.debug.print("{s}\n", .{token});
-        counter += 1;
-    }
 }
 
 test "Symbol Equality" {
