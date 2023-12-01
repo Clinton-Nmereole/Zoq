@@ -97,13 +97,13 @@ pub inline fn containsScalarComptime(
     }
 }
 
-//TODO: Implement a parser
 pub const Token = union(enum) {
     identifier: []const u8,
     number: []const u8,
     openParen,
     closeParen,
     comma,
+    equals,
     eof: enum(comptime_int) {},
 
     err: Err,
@@ -116,7 +116,7 @@ pub const Token = union(enum) {
         comptime if (std.meta.activeTag(this) != other) return false;
 
         return switch (this) {
-            .comma, .openParen, .closeParen, .eof => true,
+            .comma, .openParen, .closeParen, .eof, .equals => true,
             inline .identifier, .number => |str, tag| eqlComptime(u8, str, @field(other, @tagName(tag))),
             .err => |err| err == other.err,
         };
@@ -134,7 +134,7 @@ pub const Token = union(enum) {
         };
         switch (self) {
             inline .identifier, .number => |str, tag| try writer.writeAll(comptime std.fmt.comptimePrint("{s}({s})", .{ @tagName(tag), str })),
-            .comma, .openParen, .closeParen, .eof => try writer.writeAll(@tagName(self)),
+            .comma, .openParen, .closeParen, .eof, .equals => try writer.writeAll(@tagName(self)),
             .err => |err| try writer.writeAll(comptime std.fmt.comptimePrint("{s}({s})", .{ @tagName(self), @tagName(err) })),
         }
     }
@@ -181,12 +181,13 @@ fn peekImpl(
         std.ascii.control_code.ff,
         => unreachable,
 
-        ',', '(', ')', '[', ']' => |char| return .{
+        ',', '(', ')', '=' => |char| return .{
             .state = .{ .index = lexer.index + 1 },
             .token = switch (char) {
                 ',' => .comma,
                 '(' => .openParen,
                 ')' => .closeParen,
+                '=' => .equals,
                 else => unreachable,
             },
         },
@@ -232,6 +233,27 @@ pub inline fn next(
     comptime {
         const result = lexer.peekImpl(scalarSlice(u8, buffer[0..].*));
         lexer.* = result.state;
+        return result.token;
+    }
+}
+
+pub inline fn next2(
+    lexer: *Lexer,
+    comptime buffer: []const u8,
+) Token {
+    comptime {
+        const result = lexer.peekImpl(scalarSlice(u8, buffer[0..].*));
+        lexer.* = result.state;
+        return result.token;
+    }
+}
+
+pub inline fn peek(
+    comptime lexer: *Lexer,
+    comptime buffer: []const u8,
+) Token {
+    comptime {
+        const result = lexer.peekImpl(scalarSlice(u8, buffer[0..].*));
         return result.token;
     }
 }
