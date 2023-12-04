@@ -2,7 +2,7 @@ const std = @import("std");
 const Lexer = @import("lexer.zig");
 const Token = Lexer.Token;
 
-const Zoq = @import("main.zig");
+const Zoq = @import("expression.zig");
 const Expression = Zoq.Expression;
 
 //reads tokens from a buffer and prints them to console.

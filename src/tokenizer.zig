@@ -20,6 +20,7 @@ pub fn isIdentifierChar(char: u8) bool {
 }
 
 pub const TokenType = union(enum) {
+    Quit,
     identifier,
     comma,
     equals,
@@ -36,6 +37,20 @@ pub const TokenType = union(enum) {
         return if (std.meta.activeTag(a) == std.meta.activeTag(b)) true else false;
     }
 };
+
+pub fn keyword(name: []const u8) ?TokenType {
+    const case = enum {
+        quit,
+        shape,
+        apply,
+    };
+    const cmd = std.meta.stringToEnum(case, name) orelse return null;
+
+    switch (cmd) {
+        .quit => return TokenType{ .Quit = {} },
+        else => return null,
+    }
+}
 
 pub const Token = struct {
     token_type: TokenType,

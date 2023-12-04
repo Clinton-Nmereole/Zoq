@@ -1,8 +1,8 @@
 const std = @import("std");
 const Token = @import("tokenizer.zig").Token;
 const Lexer = @import("tokenizer.zig").Lexer;
-const Expression = @import("main.zig").Expression;
-const Zoq = @import("main.zig");
+const Expression = @import("expression.zig").Expression;
+const Zoq = @import("expression.zig");
 const Rule = Zoq.Rule;
 const sym = Zoq.sym;
 const fun = Zoq.fun;
@@ -57,6 +57,74 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
     }
 }
 
+pub fn getUserExpr() !void {
+    const stdin = std.io.getStdIn().reader();
+    const stdout = std.io.getStdOut().writer();
+
+    var buf: [2048]u8 = undefined;
+    try stdout.print("Enter an expression: ", .{});
+    if (stdin.readUntilDelimiterOrEof(&buf, '\n')) |line| {
+        const line2 = line.?;
+        var lexer2 = Lexer.init(line2);
+        var expr3 = parseexpr(&lexer2);
+        if (expr3) |expr| {
+            try stdout.print("{}\n", .{expr});
+        } else |err| {
+            try stdout.print("error: {any}\n", .{err});
+        }
+    } else |err| {
+        try stdout.print("error: {any}\n", .{err});
+    }
+}
+
+pub fn bufferedReader(stream: anytype) std.io.BufferedReader(4096, @TypeOf(stream)) {
+    return .{ .unbuffered_reader = stream };
+}
+
+pub fn bufferedWriter(stream: anytype) std.io.BufferedWriter(4096, @TypeOf(stream)) {
+    return .{ .unbuffered_writer = stream };
+}
+
+pub fn getUserExprBuffered() !void {
+    const in = std.io.getStdIn();
+    const out = std.io.getStdOut();
+    var buf = bufferedReader(in.reader());
+    var buf2 = bufferedWriter(out.writer());
+    var w = buf2.writer();
+
+    var r = buf.reader();
+    std.debug.print("Zoq> ", .{});
+
+    var msg_buf: [4096]u8 = undefined;
+    var msg = r.readUntilDelimiterOrEof(&msg_buf, '\n');
+    if (msg) |m| {
+        const m2 = m.?;
+        if (std.mem.eql(u8, m2, "quit")) {
+            return;
+        }
+        var lexer2 = Lexer.init(m2);
+        var expr3 = parseexpr(&lexer2);
+        if (expr3) |expr| {
+            try w.print("{}\n", .{expr});
+        } else |err| {
+            try w.print("error: {any}\n", .{err});
+        }
+    } else |err| {
+        try w.print("\n", .{});
+        try w.print("error: {any}\n", .{err});
+    }
+
+    try w.print("\n", .{});
+    try buf2.flush();
+}
+
+pub fn interact() !void {
+    var quit: bool = false;
+    while (!quit) {
+        try getUserExprBuffered();
+    }
+}
+
 pub fn main() !void {
     const buffer = "swap(pair(a,b))";
     var lexer = Lexer.init(buffer);
@@ -81,4 +149,6 @@ pub fn main() !void {
     };
     std.debug.print("swap expression applied: {!}\n", .{addition_expr.apply(expr2)});
     std.debug.print("swap expression applied: {!}\n", .{swap_expr.apply(expr2)});
+    try interact();
+    //try getUserExprBuffered();
 }
