@@ -198,12 +198,21 @@ pub const Expression = union(enum) {
     }
 };
 
-pub inline fn sym(comptime symbol_name: []const u8) Expression {
+pub inline fn sym(symbol_name: []const u8) Expression {
     return Expression{ .symbol = .{ .str = symbol_name } };
 }
 
-pub inline fn fun(comptime name: []const u8, comptime args: []const Expression) Expression {
+pub inline fn fun(name: []const u8, args: []const Expression) Expression {
     return Expression{ .function = .{ .name = name, .args = args } };
+}
+
+fn append_expr(
+    expr: Expression,
+    list: []const Expression,
+) []const Expression {
+    var newlist = list;
+    newlist = newlist ++ @as([]const Expression, &.{expr});
+    return newlist;
 }
 
 //A rule is a struct that has an expression and its equivalent

@@ -17,6 +17,21 @@ pub inline fn list_tokens(
     }
 }
 
+pub inline fn token_length(
+    comptime buffer: []const u8,
+) usize {
+    comptime var lexer = Lexer{};
+    comptime var actual_token = lexer.next(buffer);
+    comptime var length: usize = 0;
+    inline while (actual_token != .eof) {
+        length += 1;
+        actual_token = lexer.next(buffer);
+    }
+    comptime {
+        return length;
+    }
+}
+
 // Return the first token in a buffer in a list
 pub inline fn firsttok_list(
     comptime buffer: []const u8,
@@ -108,46 +123,123 @@ pub inline fn parse_function(
     return Zoq.fun(function, &arr);
 }
 
-//TODO: Make an Abstract Syntax Tree
-const AST = struct {
-    pub const Exprs = union(enum) {
-        symbol: []const u8,
-        function: []const u8,
-        func_args: []const u8,
-    };
+pub inline fn parse_expr_to_list(comptime buffer: []const u8, comptime list: []const Expression) ![]const Expression {
+    comptime var lexer = Lexer{};
 
-    root: ?*Node,
-    const Node = struct {
-        value: ?Token,
-        left: ?*Node,
-        right: ?*Node,
-    };
-};
+    comptime var forward_token = lexer.peek(buffer);
+    comptime var expr_arr = list;
+    inline while (forward_token != .eof) {
+        comptime var current_token = forward_token;
+        forward_token = lexer.next(buffer);
+        if (forward_token == .openParen and current_token == .identifier) {
+            var fun_args = &.{};
+            comptime var item = Zoq.fun(current_token.identifier, fun_args);
+            expr_arr = expr_arr ++ @as([]const Expression, &.{item});
+        }
+        comptime if (current_token == .identifier and forward_token != .openParen and !forward_token.eql(current_token)) {
+            comptime var item = Zoq.sym(current_token.identifier);
+            expr_arr = expr_arr ++ @as([]const Expression, &.{item});
+        };
+    }
+    return expr_arr;
+}
+
+pub inline fn parse_expr(comptime buffer: []const u8) !Expression {
+    comptime var lexer = Lexer{};
+    comptime var forward_token = lexer.peek(buffer);
+    inline while (forward_token != .eof) {
+        comptime var current_token = forward_token;
+        forward_token = lexer.next(buffer);
+        if (forward_token == .openParen and current_token == .identifier) {
+            comptime var fun_args: []const Expression = &.{};
+            comptime var fun_name = current_token.identifier;
+
+            current_token = forward_token;
+            forward_token = lexer.next(buffer);
+            if (forward_token == .closeParen) {
+                return Zoq.fun(fun_name, fun_args);
+            }
+            inline while (lexer.peek(buffer) != .closeParen) {
+                comptime var args2 = try parse_expr(buffer[lexer.index - 1 ..]);
+                fun_args = fun_args ++ @as([]const Expression, &.{args2});
+                current_token = forward_token;
+                forward_token = lexer.next(buffer);
+            }
+
+            current_token = forward_token;
+            forward_token = lexer.next(buffer);
+            return Zoq.fun(fun_name, fun_args);
+        } else if (current_token == .identifier and forward_token != .openParen and !forward_token.eql(current_token)) {
+            comptime var item = Zoq.sym(current_token.identifier);
+            return item;
+        }
+    }
+}
+
+//FIX: parse_2 can not handle multiple arguments. The issue is with the comma handling
+pub inline fn parse_expr2(comptime buffer: []const u8) !Expression {
+    comptime var lexer = Lexer{};
+    comptime var current_token = lexer.peek(buffer);
+    comptime var mover = lexer.next(buffer);
+    inline while (current_token != .eof) {
+        current_token = mover;
+        mover = lexer.next(buffer);
+        switch (mover) {
+            .openParen, .closeParen, .comma, .identifier, .equals => {
+                if (mover == .openParen) {
+                    comptime var fun_args: []const Expression = &.{};
+                    comptime var fun_name = current_token.identifier;
+                    current_token = mover;
+                    mover = lexer.next(buffer);
+                    if (mover == .closeParen) {
+                        comptime {
+                            return Zoq.fun(fun_name, fun_args);
+                        }
+                    }
+                    comptime var arg2 = try parse_expr2(buffer[lexer.identstart..]);
+                    fun_args = fun_args ++ @as([]const Expression, &.{arg2});
+                    //BUG: The bug is here, this entire "if" block needs to be fixed
+                    if (lexer.peek(buffer) != .closeParen) {
+                        current_token = mover;
+                        mover = lexer.next(buffer);
+                        inline while (mover == .comma or mover == .closeParen) {
+                            current_token = mover;
+                            mover = lexer.next(buffer);
+                            comptime var arg3 = try parse_expr2(buffer[lexer.identstart..]);
+                            fun_args = fun_args ++ @as([]const Expression, &.{arg3});
+                        }
+                    }
+                    current_token = mover;
+                    mover = lexer.next(buffer);
+
+                    return Zoq.fun(fun_name, fun_args);
+                } else {
+                    return Zoq.sym(current_token.identifier);
+                }
+            },
+            else => {
+                return error.MalformedExpression;
+            },
+        }
+    }
+}
 
 pub fn main() !void {
-    var a = try parse_symbol("abr");
-    std.debug.print("{}\n", .{a});
-    std.debug.print("{}\n", .{@TypeOf(a)});
-    var b = try parse_function("add(a,b)");
-    std.debug.print("{}\n", .{b});
-    //var k = try parse_function("f(x)");
-    //std.debug.print("{}\n", .{k});
-    comptime var buffer = "add(a,b)";
-    try list_tokens(buffer);
-    comptime var k = firsttok_list(buffer);
-    std.debug.print("{any}\n", .{k});
-    //comptime var j = &[_]Token{};
-    comptime var l = make_token_list(buffer, &[_]Token{});
-    std.debug.print("{any}\n", .{@TypeOf(l)});
-    const f = std.fmt.comptimePrint("{any}", .{l});
-    std.debug.print("{s}\n", .{f});
+    var b = try parse_expr_to_list("add(a,a)", &[_]Expression{});
+    for (b) |z| {
+        std.debug.print("{s}\n", .{@tagName(z)});
+    }
+    std.debug.print("{any}\n", .{b});
 
-    comptime var m = append_token(.{ .identifier = "happy" }, &[_]Token{.comma});
-    m = append_token(.{ .identifier = "ok" }, m);
-    m = prepend_token(.openParen, m);
-    std.debug.print("{any}\n", .{@TypeOf(m)});
-    comptime var j = std.fmt.comptimePrint("{any}", .{m});
-    std.debug.print("{s}\n", .{j});
+    var c = try parse_expr("add(f,w)");
+    std.debug.print("{s}\n", .{@tagName(c)});
+    std.debug.print("{any}\n", .{c});
+    for (c.function.args) |z| {
+        std.debug.print("{s}\n", .{@tagName(z)});
+    }
+    var o = try parse_expr2("night()");
+    //const x = std.fmt.comptimePrint("{any}", .{o});
+    std.debug.print("{s}\n", .{o});
 }
 
 test "parser" {

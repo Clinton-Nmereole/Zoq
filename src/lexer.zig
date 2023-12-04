@@ -3,6 +3,7 @@ const std = @import("std");
 const Lexer = @This();
 
 index: comptime_int = 0,
+identstart: comptime_int = 0,
 
 pub const whitespace_chars: []const u8 = &[_]u8{
     ' ',
@@ -104,7 +105,7 @@ pub const Token = union(enum) {
     closeParen,
     comma,
     equals,
-    eof: enum(comptime_int) {},
+    eof: enum(comptime_int) {}, //Note this can be made into a regular enum value without being comptime.
 
     err: Err,
 
@@ -156,6 +157,7 @@ fn peekImpl(
             ' ', '\t', '\n', '\r', std.ascii.control_code.vt, std.ascii.control_code.ff => {
                 const whitespace_end = indexOfNonePosComptime(u8, buffer[0..].*, lexer.index + 1, whitespace_chars[0..].*) orelse buffer.len;
                 lexer.index = whitespace_end;
+                lexer.identstart = whitespace_end;
             },
             else => {},
         }
@@ -164,7 +166,7 @@ fn peekImpl(
     switch ((buffer ++ &[_:0]u8{})[lexer.index]) {
         0 => |sentinel| {
             if (lexer_init.index != buffer.len) return .{
-                .state = .{ .index = lexer.index + 1 },
+                .state = .{ .index = lexer.index, .identstart = lexer.identstart },
                 .token = .{ .err = .{ .unexpected_byte = sentinel } },
             };
             return .{
@@ -182,7 +184,7 @@ fn peekImpl(
         => unreachable,
 
         ',', '(', ')', '=' => |char| return .{
-            .state = .{ .index = lexer.index + 1 },
+            .state = .{ .index = lexer.index + 1, .identstart = lexer.identstart + 1 },
             .token = switch (char) {
                 ',' => .comma,
                 '(' => .openParen,
@@ -200,7 +202,7 @@ fn peekImpl(
             const end = indexOfNonePosComptime(u8, buffer[0..].*, start + 1, identifier_characters[0..].*) orelse buffer.len;
             const ident = scalarSlice(u8, buffer[start..end].*);
             return .{
-                .state = .{ .index = end },
+                .state = .{ .index = end, .identstart = start },
                 .token = .{ .identifier = ident },
             };
         },
@@ -214,12 +216,12 @@ fn peekImpl(
             const literal_src = scalarSlice(u8, buffer[start..][zig_tok.loc.start..zig_tok.loc.end].*);
 
             return .{
-                .state = .{ .index = start + literal_src.len },
+                .state = .{ .index = start + literal_src.len, .identstart = start },
                 .token = .{ .number = literal_src },
             };
         },
         else => |char| return .{
-            .state = .{ .index = lexer.index + 1 },
+            .state = .{ .index = lexer.index + 1, .identstart = lexer.identstart + 1 },
             .token = .{ .err = .{ .Unexpectedbyte = char } },
         },
     }
@@ -228,17 +230,6 @@ fn peekImpl(
 
 pub inline fn next(
     comptime lexer: *Lexer,
-    comptime buffer: []const u8,
-) Token {
-    comptime {
-        const result = lexer.peekImpl(scalarSlice(u8, buffer[0..].*));
-        lexer.* = result.state;
-        return result.token;
-    }
-}
-
-pub inline fn next2(
-    lexer: *Lexer,
     comptime buffer: []const u8,
 ) Token {
     comptime {
@@ -266,7 +257,7 @@ fn testLexer(
     inline for (expected) |expected_token| {
         const actual_token = lexer.next(buffer);
         comptime if (actual_token.eql(expected_token)) continue;
-        std.log.err("Expected '{}', got '{}'", .{ expected_token, actual_token });
+        std.log.err("Expected '{}', got '{}'", .{ expected_token, actual_token }); //changing the value of eof would require the use of comptime print not just std.log.err
         return error.TestExpectedEqual;
     }
     const expected_token: Token = .eof;
@@ -274,6 +265,19 @@ fn testLexer(
     if (!expected_token.eql(actual_token)) {
         std.log.err("Expected '{}', got '{}'", .{ expected_token, actual_token });
         return error.TestExpectedEqual;
+    }
+}
+
+fn test_idx(
+    comptime buffer: []const u8,
+) comptime_int {
+    comptime var lexer = Lexer{};
+    comptime var actual_token = lexer.next(buffer);
+    inline while (actual_token != .eof) {
+        actual_token = lexer.next(buffer);
+    }
+    comptime {
+        return lexer.index;
     }
 }
 
@@ -289,6 +293,10 @@ test "lexer" {
     };
     try std.testing.expect(mytoken.eql(mytoken2) == true);
     try std.testing.expect(mytoken.eql(mytoken3) == false);
+}
+
+test "index" {
+    try std.testing.expect(test_idx("test(able)") == 10);
 }
 
 test Lexer {
