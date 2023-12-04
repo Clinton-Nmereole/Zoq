@@ -127,7 +127,7 @@ pub const Expression = union(enum) {
             },
             .function => |f| switch (other) {
                 .symbol => false,
-                .function => |f2| std.mem.eql(u8, f.name, f2.name) and f.args.len == f2.args.len,
+                .function => |f2| (std.mem.eql(u8, f.name, f2.name) and f.args.len == f2.args.len),
             },
         };
     }
@@ -248,20 +248,35 @@ pub const Rule = struct {
         if (self.expression.isPattern(expr)) {
             var amap = stringmap.init(allocator);
             defer amap.deinit();
-            var temp = self.equivalent.putinMap(expr, &amap) catch return NoMatch.NO_MATCH; // this is a function that put inserts a (string, Expression) pair
+            var temp = self.expression.putinMap(expr, &amap) catch return NoMatch.NO_MATCH; // this is a function that put inserts a (string, Expression) pair
             _ = temp;
             var iter = amap.iterator(); // make the map an iterator
             const arg_len = self.equivalent.function.args.len;
             return switch (self.expression) {
                 .symbol => |_| switch (expr) {
                     .symbol => |_| self.equivalent,
-                    .function => unreachable,
+                    .function => |_| {
+                        if (self.equivalent.isFunction()) {
+                            var args = allocator.alloc(Expression, self.equivalent.function.args.len) catch return NoMatch.NO_MATCH;
+                            for (self.equivalent.function.args, 0..) |arg, i| {
+                                if (arg.isSymbol() and arg.eql(self.expression)) {
+                                    args[i] = expr;
+                                } else {
+                                    args[i] = arg;
+                                }
+                            }
+                            var new_expr = Expression{ .function = .{ .name = self.equivalent.function.name, .args = args } };
+                            return new_expr;
+                        } else {
+                            unreachable;
+                        }
+                    },
                 },
                 .function => |_| switch (expr) {
                     .symbol => unreachable,
                     .function => |_| {
                         var arg_arr = allocator.alloc(Expression, arg_len) catch return NoMatch.NO_MATCH;
-                        var k = arg_len - 1;
+                        var k: usize = 0;
                         while (iter.next()) |entry| {
                             if (self.expression.isPattern(entry.value_ptr.*)) {
                                 arg_arr[k] = try self.apply(entry.value_ptr.*);
@@ -270,8 +285,8 @@ pub const Rule = struct {
                             }
                             //std.debug.print("{}\n", .{sub});
 
-                            if (k > 0) {
-                                k -= 1;
+                            if (k < arg_len - 1) {
+                                k += 1;
                             }
                         }
                         const arg_slice = arg_arr[0..arg_len];
@@ -295,6 +310,11 @@ pub const Rule = struct {
 pub const swap_expr = Rule{
     .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
     .equivalent = fun("pair", &.{ sym("b"), sym("a") }),
+};
+
+pub const ident = Rule{
+    .expression = sym("x"),
+    .equivalent = fun("add", &.{ sym("x"), sym("0") }),
 };
 
 pub const addition_expr = Rule{
@@ -328,7 +348,15 @@ pub fn main() !void {
     defer mymap.deinit();
     const expr1 = fun("add", &.{ sym("x"), sym("y") });
     const expr2 = fun("add", &.{ sym("a"), sym("b") });
+
+    const expr3 = sym("x");
+
+    const expr4 = fun("add", &.{ sym("j"), sym("k") });
     try expr1.putinMap(expr2, &mymap);
+    var myiden = try ident.apply(expr3);
+    var myadd = try addition_expr.apply(expr4);
+    std.debug.print("{!}\n", .{myiden});
+    std.debug.print("{!}\n", .{myadd});
 }
 
 test "Symbol Equality" {

@@ -3,8 +3,12 @@ const Token = @import("tokenizer.zig").Token;
 const Lexer = @import("tokenizer.zig").Lexer;
 const Expression = @import("main.zig").Expression;
 const Zoq = @import("main.zig");
+const Rule = Zoq.Rule;
+const sym = Zoq.sym;
+const fun = Zoq.fun;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
+const tokenize = std.mem.tokenizeAny;
 
 pub fn parsesym(lexer: *Lexer) !Expression {
     var token = lexer.next();
@@ -54,7 +58,7 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
 }
 
 pub fn main() !void {
-    const buffer = "f(g(w),b)";
+    const buffer = "swap(pair(a,b))";
     var lexer = Lexer.init(buffer);
 
     //var peeked = lexer.peek();
@@ -66,4 +70,15 @@ pub fn main() !void {
     var expr2 = try parseexpr(&lexer);
     std.debug.print("parsed expression: {}\n", .{expr2});
     //std.debug.print("Type of expression is: {s}\n", .{@tagName(expr2)});
+    const addition_expr = Rule{
+        .expression = fun("add", &.{ sym("a"), sym("b") }),
+        .equivalent = fun("add", &.{ sym("b"), sym("a") }),
+    };
+
+    const swap_expr = Rule{
+        .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
+        .equivalent = fun("pair", &.{ sym("b"), sym("a") }),
+    };
+    std.debug.print("swap expression applied: {!}\n", .{addition_expr.apply(expr2)});
+    std.debug.print("swap expression applied: {!}\n", .{swap_expr.apply(expr2)});
 }

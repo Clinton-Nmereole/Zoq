@@ -90,6 +90,18 @@ pub const Lexer = struct {
     pub fn next(self: *Self) Token {
         self.read();
         const token = switch (self.ch) {
+            ' ',
+            '\t',
+            '\n',
+            '\r',
+            std.ascii.control_code.vt,
+            std.ascii.control_code.ff,
+            => {
+                while (std.mem.indexOfScalar(u8, whitespace_chars, self.ch) != null) self.read();
+                self.read_pos = self.pos;
+                self.pos -= 1;
+                return self.next();
+            },
             '=' => Token{
                 .token_type = .equals,
                 .value = "=",
