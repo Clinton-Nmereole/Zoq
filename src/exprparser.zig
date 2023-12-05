@@ -10,12 +10,21 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 const tokenize = std.mem.tokenizeAny;
 
+const swap_expr1 = Zoq.swap_expr;
+
 pub fn parsesym(lexer: *Lexer) !Expression {
     var token = lexer.next();
     if (token.token_type == .identifier) {
         return .{ .symbol = .{ .str = token.value } };
     }
     return error.NotASymbol;
+}
+
+pub fn applyswap(a: Expression) !Expression {
+    if (a.isFunction()) {
+        return swap_expr1.apply(a);
+    }
+    return error.NotAFunction;
 }
 
 pub fn parseexpr(lexer: *Lexer) !Expression {
@@ -47,6 +56,13 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
                     var sym_name = name.value;
                     return Zoq.sym(sym_name);
                 }
+            },
+            .Apply => {
+                var appen = try parseexpr(lexer);
+                return applyswap(appen);
+            },
+            .Quit => {
+                return error.Quit;
             },
             else => {
                 return error.NotAnExpression;
@@ -99,9 +115,6 @@ pub fn getUserExprBuffered() !void {
     var msg = r.readUntilDelimiterOrEof(&msg_buf, '\n');
     if (msg) |m| {
         const m2 = m.?;
-        if (std.mem.eql(u8, m2, "quit")) {
-            return;
-        }
         var lexer2 = Lexer.init(m2);
         var expr3 = parseexpr(&lexer2);
         if (expr3) |expr| {
@@ -118,10 +131,51 @@ pub fn getUserExprBuffered() !void {
     try buf2.flush();
 }
 
+pub fn getUserExprBufferedInput() !?[]u8 {
+    const in = std.io.getStdIn();
+    var buf = bufferedReader(in.reader());
+
+    var r = buf.reader();
+    std.debug.print("Zoq> ", .{});
+
+    var msg_buf: [4096]u8 = undefined;
+    var msg = r.readUntilDelimiterOrEof(&msg_buf, '\n');
+    return msg;
+}
+
 pub fn interact() !void {
     var quit: bool = false;
     while (!quit) {
-        try getUserExprBuffered();
+        const in = std.io.getStdIn();
+        const out = std.io.getStdOut();
+        var buf = bufferedReader(in.reader());
+        var buf2 = bufferedWriter(out.writer());
+        var w = buf2.writer();
+
+        var r = buf.reader();
+        std.debug.print("Zoq> ", .{});
+
+        var msg_buf: [4096]u8 = undefined;
+        var msg = r.readUntilDelimiterOrEof(&msg_buf, '\n');
+        if (msg) |m| {
+            const m2 = m.?;
+            var lexer2 = Lexer.init(m2);
+            var expr3 = parseexpr(&lexer2);
+            if (expr3) |expr| {
+                try w.print("{}\n", .{expr});
+            } else |err| {
+                if (err == error.Quit) {
+                    quit = true;
+                }
+                try w.print("error: {any}\n", .{err});
+            }
+        } else |err| {
+            try w.print("\n", .{});
+            try w.print("error: {any}\n", .{err});
+        }
+
+        try w.print("\n", .{});
+        try buf2.flush();
     }
 }
 
@@ -151,4 +205,6 @@ pub fn main() !void {
     std.debug.print("swap expression applied: {!}\n", .{swap_expr.apply(expr2)});
     try interact();
     //try getUserExprBuffered();
+    //var k = try getUserExprBufferedInput();
+    //std.debug.print("k: {s}\n", .{k.?});
 }

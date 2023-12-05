@@ -21,6 +21,8 @@ pub fn isIdentifierChar(char: u8) bool {
 
 pub const TokenType = union(enum) {
     Quit,
+    Shape,
+    Apply,
     identifier,
     comma,
     equals,
@@ -48,7 +50,8 @@ pub fn keyword(name: []const u8) ?TokenType {
 
     switch (cmd) {
         .quit => return TokenType{ .Quit = {} },
-        else => return null,
+        .shape => return TokenType{ .Shape = {} },
+        .apply => return TokenType{ .Apply = {} },
     }
 }
 
@@ -143,6 +146,12 @@ pub const Lexer = struct {
                 const value = self.buffer[start..self.pos];
                 self.read_pos = self.pos;
                 self.pos -= 1;
+                if (keyword(value)) |token_type| {
+                    return Token{
+                        .token_type = token_type,
+                        .value = value,
+                    };
+                }
                 return Token{
                     .token_type = .identifier,
                     .value = value,
