@@ -27,12 +27,13 @@ An expression at the moment can be thought of as two things:
 A symbol is a struct that is just a string literal. For example, 'x' is a symbol. But a symbol can also be longer than one character so 'hello' is also a symbol.
 
 ### What is a Function?
-A function is a struct that has fields 'name' and 'arguments'. The 'name' field is a string literal and the 'arguments' is an array/slice of Expressions(symbols or functions) For example, 'add(x, y)' is a function with the name add and arguments [x, y] and x and y in this case are Expressions of the type Symbols. We could also have 'add(f(x), g(y))' which would be a function whose arguments are other functions [f(x), g(y)].                    
+A function is a struct that has fields 'name' and 'arguments'. The 'name' field is a string literal and the 'arguments' is an array/slice of Expressions(symbols or functions)\
+For example, 'add(x, y)' is a function with the name add and arguments [x, y] and x and y in this case are Expressions of the type Symbols.\ We could also have 'add(f(x), g(y))' which would be a function whose arguments are other functions [f(x), g(y)].                    
 
 ### What is a Rule?
 A rule is a struct that has fields 'expression' and 'equivalent'. Both fields are Expressions. A Rule works on the principle of 'add(x, y) ≡ add(y, x)'.
 It tells us that the field 'expression' is mathematically equivalent to the field 'equivalent'.\
-Rule has a method 'apply', that takes an Expression pattern matches it to the Rules expression field and returns the equivalent to the entered Expression.
+Rule has a method 'apply', that takes an Expression pattern matches it to the Rules expression field and returns the equivalent to the entered Expression.\
 Example:
 
 ```console
