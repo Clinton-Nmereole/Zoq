@@ -97,8 +97,9 @@ pub fn parseRuleFromFile(filename: []const u8) !std.StringHashMap(Rule) {
     const message = try buf.readUntilDelimiterOrEof(&msg_buf, '\r');
     var lexer = Lexer.init(message.?);
     while (lexer.peek().token_type != .eof) {
+        _ = lexer.nextIf(.Rule);
         var name = lexer.nextIf(.identifier);
-        _ = lexer.nextIf(.colon);
+        //_ = lexer.nextIf(.colon);
         var rule = try parseRule(&lexer);
         try rules_table.put(name.?.value, rule);
     }
@@ -111,36 +112,6 @@ pub fn bufferedReader(stream: anytype) std.io.BufferedReader(4096, @TypeOf(strea
 
 pub fn bufferedWriter(stream: anytype) std.io.BufferedWriter(4096, @TypeOf(stream)) {
     return .{ .unbuffered_writer = stream };
-}
-
-pub fn getUserExprBuffered() !void {
-    const in = std.io.getStdIn();
-    const out = std.io.getStdOut();
-    var buf = bufferedReader(in.reader());
-    var buf2 = bufferedWriter(out.writer());
-    var w = buf2.writer();
-
-    var r = buf.reader();
-    std.debug.print("Zoq> ", .{});
-
-    var msg_buf: [4096]u8 = undefined;
-    var msg = r.readUntilDelimiterOrEof(&msg_buf, '\n');
-    if (msg) |m| {
-        const m2 = m.?;
-        var lexer2 = Lexer.init(m2);
-        var expr3 = parseexpr(&lexer2);
-        if (expr3) |expr| {
-            try w.print("{}\n", .{expr});
-        } else |err| {
-            try w.print("error: {any}\n", .{err});
-        }
-    } else |err| {
-        try w.print("\n", .{});
-        try w.print("error: {any}\n", .{err});
-    }
-
-    try w.print("\n", .{});
-    try buf2.flush();
 }
 
 pub fn interact() !void {
@@ -160,14 +131,20 @@ pub fn interact() !void {
         if (msg) |m| {
             const m2 = m.?;
             var lexer2 = Lexer.init(m2);
-            var expr3 = parseexpr(&lexer2);
-            if (expr3) |expr| {
-                try w.print("{}\n", .{expr});
-            } else |err| {
-                if (err == error.Quit) {
-                    quit = true;
-                } else {
-                    try w.print("error: {any}\n", .{err});
+            if (lexer2.peek().token_type == .Rule) {
+                _ = lexer2.next();
+                var rule = try parseRule(&lexer2);
+                try w.print("{}\n", .{rule});
+            } else {
+                var expr3 = parseexpr(&lexer2);
+                if (expr3) |expr| {
+                    try w.print("{}\n", .{expr});
+                } else |err| {
+                    if (err == error.Quit) {
+                        quit = true;
+                    } else {
+                        try w.print("error: {any}\n", .{err});
+                    }
                 }
             }
         } else |err| {

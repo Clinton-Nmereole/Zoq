@@ -1,4 +1,5 @@
-swap : swap(tuple(a, b)) = tuple(b, a)
-rot  : rot(tuple(a, b, c)) = tuple(c, a, b)
-add  : add(a, b) = add(b, a)
-add_iden  : a = add(a,zero)
+rule swap  swap(tuple(a, b)) = tuple(b, a)
+rule rot rot(tuple(a, b, c)) = tuple(c, a, b)
+rule add add(a, b) = add(b, a)
+rule mult mult(a, b) = mult(b, a)
+

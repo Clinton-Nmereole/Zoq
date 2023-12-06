@@ -35,16 +35,25 @@ pub fn isIdentifierChar(char: u8) bool {
 }
 
 pub const TokenType = union(enum) {
+    //keywords
     Quit,
     Shape,
     Apply,
+    Done,
+    Rule,
+
+    //symbols
     identifier,
     number,
+
+    //special characters
     comma,
     equals,
     open_paren,
     close_paren,
     colon,
+
+    //terminators
     eof,
     err: Errer,
 
@@ -62,6 +71,8 @@ pub fn keyword(name: []const u8) ?TokenType {
         quit,
         shape,
         apply,
+        done,
+        rule,
     };
     const cmd = std.meta.stringToEnum(case, name) orelse return null;
 
@@ -69,6 +80,8 @@ pub fn keyword(name: []const u8) ?TokenType {
         .quit => return TokenType{ .Quit = {} },
         .shape => return TokenType{ .Shape = {} },
         .apply => return TokenType{ .Apply = {} },
+        .done => return TokenType{ .eof = {} },
+        .rule => return TokenType{ .Rule = {} },
     }
 }
 
