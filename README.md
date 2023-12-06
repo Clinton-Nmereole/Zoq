@@ -47,7 +47,7 @@ To start the REPL, type `zig build run`
 This is a image should show the functionality of the Zoq REPL: 
 
 <div align="center">
-<img src="../../zoq_test.png" alt="Zoq REPL"/>
+<img src="./assets/zoq_test.png" alt="Zoq REPL"/>
 </div>
 
 
