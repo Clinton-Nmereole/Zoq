@@ -6,6 +6,21 @@ pub const identifier_characters: []const u8 =
     "_" //
 ;
 
+pub const operator_characters: []const u8 = &[_]u8{
+    '+',
+    '-',
+    '*',
+    '/',
+    '^',
+    '%',
+    '&',
+    '|',
+    '!',
+    '<',
+    '>',
+    '?',
+};
+
 pub const whitespace_chars: []const u8 = &[_]u8{
     ' ',
     '\t',
@@ -24,10 +39,12 @@ pub const TokenType = union(enum) {
     Shape,
     Apply,
     identifier,
+    number,
     comma,
     equals,
     open_paren,
     close_paren,
+    colon,
     eof,
     err: Errer,
 
@@ -136,6 +153,10 @@ pub const Lexer = struct {
                 .token_type = .close_paren,
                 .value = ")",
             },
+            ':' => Token{
+                .token_type = .colon,
+                .value = ":",
+            },
             0 => Token{
                 .token_type = .eof,
                 .value = "eof",
@@ -157,6 +178,17 @@ pub const Lexer = struct {
                     .value = value,
                 };
             },
+            '0'...'9' => {
+                const start = self.pos;
+                while (std.ascii.isDigit(self.ch)) self.read();
+                const value = self.buffer[start..self.pos];
+                self.read_pos = self.pos;
+                self.pos = self.pos - 1;
+                return Token{
+                    .token_type = .number,
+                    .value = value,
+                };
+            },
             else => Token{
                 .token_type = .{ .err = .{ .unexpected_byte = self.ch } },
                 .value = "error",
@@ -172,6 +204,8 @@ pub const Lexer = struct {
         return null;
     }
 };
+
+//TODO: Write expect token function.
 
 pub fn main() !void {
     const buffer = "a()(,)";
