@@ -45,6 +45,10 @@ Rule.apply(Input Expression) => add(b, a)
 ### REPL so far
 To start the REPL, type `zig build run`
 This is a image should show the functionality of the Zoq REPL: 
+
+<div align="center">
+<img src="../zoq_test.png" alt="Zoq REPL"/>
+</div>
 ![REPL](../zoq_test.png)
 
 
