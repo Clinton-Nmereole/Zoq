@@ -3,15 +3,22 @@ const Token = @import("tokenizer.zig").Token;
 const Lexer = @import("tokenizer.zig").Lexer;
 const Expression = @import("expression.zig").Expression;
 const Zoq = @import("expression.zig");
-const Rule = Zoq.Rule;
+const Rule = @import("expression.zig").Rule;
 const sym = Zoq.sym;
 const fun = Zoq.fun;
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 const allocator = gpa.allocator();
 const tokenize = std.mem.tokenizeAny;
 const stringmap = std.StringHashMap(Rule);
-
 const swap_expr1 = Zoq.swap_expr;
+
+const keywordset = [_]Token{
+    Token{ .token_type = .Apply, .value = "apply" },
+    Token{ .token_type = .Shape, .value = "shape" },
+    Token{ .token_type = .Rule, .value = "rule" },
+    Token{ .token_type = .Quit, .value = "quit" },
+    Token{ .token_type = .Done, .value = "done" },
+};
 
 pub fn parsesym(lexer: *Lexer) !Expression {
     var token = lexer.next();
@@ -62,10 +69,6 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
                 var sym_name = name.value;
                 return Zoq.sym(sym_name);
             },
-            .Apply => {
-                var appen = try parseexpr(lexer);
-                return applyswap(appen);
-            },
             .Quit => {
                 return error.Quit;
             },
@@ -82,7 +85,7 @@ pub fn parseRule(lexer: *Lexer) !Rule {
     var rule_expr = try parseexpr(lexer);
     _ = lexer.nextIf(.equals);
     var rule_equiv = try parseexpr(lexer);
-    return Rule{
+    return .{
         .expression = rule_expr,
         .equivalent = rule_equiv,
     };
@@ -114,77 +117,112 @@ pub fn bufferedWriter(stream: anytype) std.io.BufferedWriter(4096, @TypeOf(strea
     return .{ .unbuffered_writer = stream };
 }
 
-pub fn interact() !void {
-    var quit: bool = false;
-    while (!quit) {
-        const in = std.io.getStdIn();
-        const out = std.io.getStdOut();
-        var buf = bufferedReader(in.reader());
-        var buf2 = bufferedWriter(out.writer());
-        var w = buf2.writer();
+pub const Context = struct {
+    rules_table: std.StringHashMap(Rule),
+    current_expr: ?Expression,
+    alloctor: std.mem.Allocator,
 
-        var r = buf.reader();
-        std.debug.print("Zoq::> ", .{});
+    pub fn init(alloctor: std.mem.Allocator) Context {
+        return .{ .rules_table = std.StringHashMap(Rule).init(alloctor), .current_expr = null, .alloctor = alloctor };
+    }
 
-        var msg_buf: [4096]u8 = undefined;
-        var msg = r.readUntilDelimiterOrEof(&msg_buf, '\n');
-        if (msg) |m| {
-            const m2 = m.?;
-            var lexer2 = Lexer.init(m2);
-            if (lexer2.peek().token_type == .Rule) {
-                _ = lexer2.next();
-                var rule = try parseRule(&lexer2);
-                try w.print("{}\n", .{rule});
-            } else {
-                var expr3 = parseexpr(&lexer2);
-                if (expr3) |expr| {
-                    try w.print("{}\n", .{expr});
-                } else |err| {
-                    if (err == error.Quit) {
-                        quit = true;
-                    } else {
-                        try w.print("error: {any}\n", .{err});
-                    }
+    pub fn get_rules_table(self: Context) std.StringHashMap(Rule) {
+        return self.rules_table;
+    }
+
+    pub fn put_rule(self: *Context, key: []const u8, value: Rule) !void {
+        var dupe_key = try allocator.dupe(u8, key);
+        errdefer self.alloctor.free(dupe_key);
+        try self.rules_table.put(dupe_key, value);
+    }
+
+    pub fn get_rule(self: *Context, key: []const u8) ?Rule {
+        return self.rules_table.get(key);
+    }
+
+    pub fn deinit(self: *Context) void {
+        self.rules_table.deinit();
+    }
+
+    pub fn get_current_expr(self: *Context) ?Expression {
+        return self.current_expr;
+    }
+
+    pub fn set_current_expr(self: *Context, expr: ?Expression) void {
+        self.current_expr = expr;
+    }
+
+    pub fn show_rules(self: Context) void {
+        var table = self.get_rules_table();
+        var it = table.iterator();
+        while (it.next()) |kv| {
+            std.debug.print("{s}: {any} = {any}\n", .{ kv.key_ptr.*, kv.value_ptr.expression, kv.value_ptr.* });
+        }
+    }
+
+    //FIX: This function has errors in both the rule and apply switches. The StringHashMap contaminates the data stored and fails to retrieve it. This is probably due to pointer magic.
+    pub fn process_command(self: *Context, lexer: *Lexer) !void {
+        var peeked = lexer.next();
+        var expected_token = blk: {
+            var expect = peeked;
+            for (keywordset) |keyword| {
+                if (expect.token_type.iseql(keyword.token_type)) {
+                    expect = keyword;
                 }
             }
-        } else |err| {
-            try w.print("\n", .{});
-            try w.print("error: {any}\n", .{err});
+            break :blk expect;
+        };
+        switch (expected_token.token_type) {
+            .Rule => {
+                var rule_name = lexer.nextIf(.identifier);
+                std.debug.print("rule?: {any}\n", .{rule_name});
+                if (self.get_rule(rule_name.?.value) != null) {
+                    return error.DuplicateRule;
+                }
+                var rule = try parseRule(lexer);
+                try self.put_rule(rule_name.?.value, rule);
+                std.debug.print("rule list: {any}\n", .{&self.rules_table.keyIterator()});
+            },
+            .Shape => {
+                if (self.get_current_expr() != null) {
+                    return error.AlreadyShapingExpression;
+                }
+                var expr = try parseexpr(lexer);
+                std.debug.print("shaping: {any}\n", .{expr});
+                self.set_current_expr(expr);
+            },
+            .Apply => {
+                if (self.current_expr == null) {
+                    return error.NoShapingInProgress;
+                }
+                var name = lexer.nextIf(.identifier);
+                var rule_name = name.?.value;
+                std.debug.print("applying rule: {s}\n", .{rule_name});
+                var rule = self.get_rule(rule_name);
+                std.debug.print("got rule: {any}\n", .{rule});
+                self.show_rules();
+                if (rule == null) {
+                    return error.RuleNotFound;
+                }
+                var expr = try parseexpr(lexer);
+                var new_expr = try rule.?.apply(expr);
+                std.debug.print("new expression: {any}\n", .{new_expr});
+                self.set_current_expr(new_expr);
+            },
+            .Done => {
+                std.debug.print("current expression: {any}\n", .{self.current_expr});
+                if (self.get_current_expr() != null) {
+                    std.debug.print("done shaping: {any}\n", .{self.current_expr});
+                    self.set_current_expr(null);
+                } else {
+                    return error.NoShapingInProgress;
+                }
+            },
+            else => {
+                std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ expected_token, keywordset });
+            },
         }
-
-        try w.print("\n", .{});
-        try buf2.flush();
     }
-}
+};
 
-pub fn main() !void {
-    const buffer = "swap(pair(a,b))";
-    var lexer = Lexer.init(buffer);
-    var expr2 = try parseexpr(&lexer);
-    std.debug.print("parsed expression: {}\n", .{expr2});
-    const addition_expr = Rule{
-        .expression = fun("add", &.{ sym("a"), sym("b") }),
-        .equivalent = fun("add", &.{ sym("b"), sym("a") }),
-    };
-
-    const swap_expr = Rule{
-        .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
-        .equivalent = fun("pair", &.{ sym("b"), sym("a") }),
-    };
-    std.debug.print("swap expression applied: {!}\n", .{addition_expr.apply(expr2)});
-    std.debug.print("swap expression applied: {!}\n", .{swap_expr.apply(expr2)});
-    //try interact();
-
-    //const myrule = "swap(pair(a,b)) = pair(b,a)";
-    //var lexer2 = Lexer.init(myrule);
-    //var expr3 = try parseRule(&lexer2);
-    //std.debug.print("parsed rule: {}\n", .{expr3});
-    //
-    const default_file = "rules.zoq";
-    var rule_list = try parseRuleFromFile(default_file);
-    var rule_iter = rule_list.iterator();
-    std.debug.print("number of rules: {}\n", .{rule_list.count()});
-    while (rule_iter.next()) |rule| {
-        std.debug.print("rule name: {s}, the rule states: {s}\n", .{ rule.key_ptr.*, rule.value_ptr.* });
-    }
-}
+pub fn main() !void {}

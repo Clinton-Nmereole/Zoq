@@ -7,7 +7,34 @@ const Rule = Zoq.Rule;
 const sym = Zoq.sym;
 const fun = Zoq.fun;
 const Parser = @import("exprparser.zig");
+const bufferedReader = Parser.bufferedReader;
+const bufferedWriter = Parser.bufferedWriter;
+const parseRule = Parser.parseRule;
+const parseexpr = Parser.parseexpr;
+const Context = Parser.Context;
 
 pub fn main() !void {
-    try Parser.interact();
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var prompt: []const u8 = "Zoq::> ";
+    var r = std.io.getStdIn().reader();
+    var w = std.io.getStdOut().writer();
+    _ = w;
+    var buf: [4096]u8 = undefined;
+    var command: []const u8 = undefined;
+
+    var context: Context = Context.init(allocator);
+    defer context.deinit();
+    while (true) {
+        std.debug.print("{s}\n", .{prompt});
+        var temp = try r.readUntilDelimiterOrEof(&buf, '\n');
+        command = temp.?;
+        var lexer = Lexer.init(command);
+        var result = try context.process_command(&lexer);
+        _ = result;
+        //std.debug.print("{any}\n", .{context.rules_table});
+    }
+    context.show_rules();
 }

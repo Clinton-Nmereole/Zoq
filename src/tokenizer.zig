@@ -80,7 +80,7 @@ pub fn keyword(name: []const u8) ?TokenType {
         .quit => return TokenType{ .Quit = {} },
         .shape => return TokenType{ .Shape = {} },
         .apply => return TokenType{ .Apply = {} },
-        .done => return TokenType{ .eof = {} },
+        .done => return TokenType{ .Done = {} },
         .rule => return TokenType{ .Rule = {} },
     }
 }
