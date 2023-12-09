@@ -34,7 +34,7 @@ pub fn applyswap(a: Expression) !Expression {
     return error.NotAFunction;
 }
 
-pub fn parseexpr(lexer: *Lexer) !Expression {
+pub fn parseexpr(lexer: *Lexer, string_allocator: std.mem.Allocator) !Expression {
     var name = lexer.next();
     if (!name.token_type.iseql(.eof)) {
         switch (name.token_type) {
@@ -44,28 +44,29 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
                     var args: std.ArrayList(Expression) = std.ArrayList(Expression).init(allocator);
                     var close = lexer.nextIf(.close_paren);
                     if (close != null) {
-                        var fun_name = name.value;
+                        _ = try string_allocator.alloc(u8, 10);
+                        var fun_name = try string_allocator.dupe(u8, name.value);
                         return Zoq.fun(fun_name, args.items);
                     }
-                    var appen1 = try parseexpr(lexer);
+                    var appen1 = try parseexpr(lexer, string_allocator);
                     try args.append(appen1);
                     //_ = lexer.nextIf(.comma);
                     while (lexer.nextIf(.comma) != null) {
-                        var appen2 = try parseexpr(lexer);
+                        var appen2 = try parseexpr(lexer, string_allocator);
                         try args.append(appen2);
                     }
                     if (lexer.nextIf(.close_paren) == null) {
                         return error.ExpectedCloseParen;
                     }
-                    var fun_name = name.value;
+                    var fun_name = try string_allocator.dupe(u8, name.value);
                     return Zoq.fun(fun_name, args.items);
                 } else {
-                    var sym_name = name.value;
+                    var sym_name = try string_allocator.dupe(u8, name.value);
                     return Zoq.sym(sym_name);
                 }
             },
             .number => {
-                var sym_name = name.value;
+                var sym_name = try string_allocator.dupe(u8, name.value);
                 return Zoq.sym(sym_name);
             },
             else => {
@@ -77,10 +78,10 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
     }
 }
 
-pub fn parseRule(lexer: *Lexer) !Rule {
-    var rule_expr = try parseexpr(lexer);
+pub fn parseRule(lexer: *Lexer, string_allocator: std.mem.Allocator) !Rule {
+    var rule_expr = try parseexpr(lexer, string_allocator);
     _ = lexer.nextIf(.equals);
-    var rule_equiv = try parseexpr(lexer);
+    var rule_equiv = try parseexpr(lexer, string_allocator);
     return .{
         .expression = rule_expr,
         .equivalent = rule_equiv,
@@ -114,24 +115,24 @@ pub fn bufferedWriter(stream: anytype) std.io.BufferedWriter(4096, @TypeOf(strea
 }
 
 pub const Context = struct {
-    rules_table: std.StringHashMap(Rule),
+    rules_table: std.StringArrayHashMap(Rule),
     current_expr: ?Expression,
     alloctor: std.mem.Allocator,
 
     pub fn init(alloctor: std.mem.Allocator) Context {
-        return .{ .rules_table = std.StringHashMap(Rule).init(alloctor), .current_expr = null, .alloctor = alloctor };
+        return .{ .rules_table = std.StringArrayHashMap(Rule).init(alloctor), .current_expr = null, .alloctor = alloctor };
     }
 
-    pub fn get_rules_table(self: Context) std.StringHashMap(Rule) {
+    pub fn get_rules_table(self: Context) std.StringArrayHashMap(Rule) {
         return self.rules_table;
     }
 
     pub fn put_rule(self: *Context, key: []const u8, value: Rule) !void {
-        var dupe_key = try self.alloctor.dupe(u8, key[0..]);
+        var dupe_key: []const u8 = try self.alloctor.dupe(u8, key[0..]);
         try self.rules_table.put(dupe_key, value);
     }
 
-    pub fn get_rule(self: *Context, key: []const u8) ?Rule {
+    pub fn get_rule(self: Context, key: []const u8) ?Rule {
         return self.rules_table.get(key);
     }
 
@@ -169,38 +170,40 @@ pub const Context = struct {
                     return error.DuplicateRule;
                 }
                 //var rule = try parseRule(lexer);
-                var head = try parseexpr(lexer);
+                var head = try parseexpr(lexer, self.alloctor);
                 _ = lexer.nextIf(.equals);
-                var body = try parseexpr(lexer);
+                var body = try parseexpr(lexer, self.alloctor);
                 var rule = Rule{ .expression = head, .equivalent = body };
                 std.debug.print("defined rule: {any}\n", .{&rule});
                 try self.put_rule(rule_name.?.value, rule);
+                self.show_rules();
             },
             .Shape => {
                 if (self.get_current_expr() != null) {
                     return error.AlreadyShapingExpression;
                 }
-                var expr = try parseexpr(lexer);
+                var expr = try parseexpr(lexer, self.alloctor);
                 std.debug.print("Shaping: {any}\n", .{expr});
                 self.set_current_expr(expr);
             },
             .Apply => {
-                var expr = &self.current_expr;
-                if (expr.* == null) {
+                if (self.current_expr == null) {
                     return error.NoShapingInProgress;
                 }
                 var name = lexer.nextIf(.identifier);
                 var rule_name: []const u8 = name.?.value;
                 std.debug.print("applying rule: {s}\n", .{rule_name});
-                var rule = self.get_rule(rule_name);
+                var rule = self.rules_table.get(rule_name);
+                var key = self.rules_table.getKey(rule_name);
                 std.debug.print("got rule: {any}\n", .{rule});
+                std.debug.print("got the key: {any}\n", .{key});
                 self.show_rules();
+                const new_expr = try rule.?.apply(self.current_expr.?);
+                std.debug.print("new expression: {any}\n", .{new_expr});
+                self.set_current_expr(new_expr);
                 if (rule == null) {
                     return error.RuleNotFound;
                 }
-                var new_expr = try rule.?.apply(expr.*.?);
-                std.debug.print("new expression: {any}\n", .{new_expr});
-                self.set_current_expr(new_expr);
             },
             .Done => {
                 std.debug.print("current expression: {any}\n", .{self.current_expr});
