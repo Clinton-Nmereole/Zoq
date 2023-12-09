@@ -6,10 +6,9 @@ const Zoq = @import("expression.zig");
 const Rule = @import("expression.zig").Rule;
 const sym = Zoq.sym;
 const fun = Zoq.fun;
-var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-const allocator = gpa.allocator();
-const tokenize = std.mem.tokenizeAny;
-const stringmap = std.StringHashMap(Rule);
+//var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+const allocator = arena.allocator();
 const swap_expr1 = Zoq.swap_expr;
 
 const keywordset = [_]Token{
@@ -68,9 +67,6 @@ pub fn parseexpr(lexer: *Lexer) !Expression {
             .number => {
                 var sym_name = name.value;
                 return Zoq.sym(sym_name);
-            },
-            .Quit => {
-                return error.Quit;
             },
             else => {
                 return error.NotAnExpression;
@@ -131,8 +127,7 @@ pub const Context = struct {
     }
 
     pub fn put_rule(self: *Context, key: []const u8, value: Rule) !void {
-        var dupe_key = try allocator.dupe(u8, key);
-        errdefer self.alloctor.free(dupe_key);
+        var dupe_key = try self.alloctor.dupe(u8, key[0..]);
         try self.rules_table.put(dupe_key, value);
     }
 
@@ -141,6 +136,8 @@ pub const Context = struct {
     }
 
     pub fn deinit(self: *Context) void {
+        var iter = self.rules_table.iterator();
+        while (iter.next()) |kv| self.alloctor.free(kv.key_ptr.*);
         self.rules_table.deinit();
     }
 
@@ -152,8 +149,8 @@ pub const Context = struct {
         self.current_expr = expr;
     }
 
-    pub fn show_rules(self: Context) void {
-        var table = self.get_rules_table();
+    pub fn show_rules(self: *Context) void {
+        const table = self.get_rules_table();
         var it = table.iterator();
         while (it.next()) |kv| {
             std.debug.print("{s}: {any} = {any}\n", .{ kv.key_ptr.*, kv.value_ptr.expression, kv.value_ptr.* });
@@ -163,40 +160,37 @@ pub const Context = struct {
     //FIX: This function has errors in both the rule and apply switches. The StringHashMap contaminates the data stored and fails to retrieve it. This is probably due to pointer magic.
     pub fn process_command(self: *Context, lexer: *Lexer) !void {
         var peeked = lexer.next();
-        var expected_token = blk: {
-            var expect = peeked;
-            for (keywordset) |keyword| {
-                if (expect.token_type.iseql(keyword.token_type)) {
-                    expect = keyword;
-                }
-            }
-            break :blk expect;
-        };
-        switch (expected_token.token_type) {
+
+        switch (peeked.token_type) {
             .Rule => {
                 var rule_name = lexer.nextIf(.identifier);
                 std.debug.print("rule?: {any}\n", .{rule_name});
                 if (self.get_rule(rule_name.?.value) != null) {
                     return error.DuplicateRule;
                 }
-                var rule = try parseRule(lexer);
+                //var rule = try parseRule(lexer);
+                var head = try parseexpr(lexer);
+                _ = lexer.nextIf(.equals);
+                var body = try parseexpr(lexer);
+                var rule = Rule{ .expression = head, .equivalent = body };
+                std.debug.print("defined rule: {any}\n", .{&rule});
                 try self.put_rule(rule_name.?.value, rule);
-                std.debug.print("rule list: {any}\n", .{&self.rules_table.keyIterator()});
             },
             .Shape => {
                 if (self.get_current_expr() != null) {
                     return error.AlreadyShapingExpression;
                 }
                 var expr = try parseexpr(lexer);
-                std.debug.print("shaping: {any}\n", .{expr});
+                std.debug.print("Shaping: {any}\n", .{expr});
                 self.set_current_expr(expr);
             },
             .Apply => {
-                if (self.current_expr == null) {
+                var expr = &self.current_expr;
+                if (expr.* == null) {
                     return error.NoShapingInProgress;
                 }
                 var name = lexer.nextIf(.identifier);
-                var rule_name = name.?.value;
+                var rule_name: []const u8 = name.?.value;
                 std.debug.print("applying rule: {s}\n", .{rule_name});
                 var rule = self.get_rule(rule_name);
                 std.debug.print("got rule: {any}\n", .{rule});
@@ -204,8 +198,7 @@ pub const Context = struct {
                 if (rule == null) {
                     return error.RuleNotFound;
                 }
-                var expr = try parseexpr(lexer);
-                var new_expr = try rule.?.apply(expr);
+                var new_expr = try rule.?.apply(expr.*.?);
                 std.debug.print("new expression: {any}\n", .{new_expr});
                 self.set_current_expr(new_expr);
             },
@@ -219,7 +212,7 @@ pub const Context = struct {
                 }
             },
             else => {
-                std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ expected_token, keywordset });
+                std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ peeked, keywordset });
             },
         }
     }
