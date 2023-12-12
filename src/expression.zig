@@ -13,6 +13,18 @@ pub const Expression = union(enum) {
     symbol: struct { str: []const u8 },
     function: struct { name: []const u8, args: []const Expression },
 
+    pub fn deinit(self: *Expression) void {
+        switch (self.*) {
+            .symbol => |s| {
+                allocator.free(s.str);
+            },
+            .function => |f| {
+                allocator.free(f.name);
+                allocator.free(f.args);
+            },
+        }
+    }
+
     //Print an expression using the print function
     pub fn print(self: Expression) void {
         switch (self) {
@@ -221,6 +233,11 @@ fn append_expr(
 pub const Rule = struct {
     expression: Expression,
     equivalent: Expression,
+
+    pub fn deinit(self: *Rule) void {
+        self.expression.deinit();
+        self.equivalent.deinit();
+    }
 
     //Print a rule using the print function from Expression
     pub fn print(self: Rule) void {

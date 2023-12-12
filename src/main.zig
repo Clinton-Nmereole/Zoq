@@ -14,27 +14,31 @@ const parseexpr = Parser.parseexpr;
 const Context = Parser.Context;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
 
     var prompt: []const u8 = "Zoq::> ";
 
     var context: Context = Context.init(allocator);
-    defer context.deinit();
-    while (true) {
+    //defer context.deinit();
+    var notquit = true;
+    while (notquit) {
         var r = std.io.getStdIn().reader();
         var w = std.io.getStdOut().writer();
         _ = w;
         var buf: [4096]u8 = undefined;
         var command: []const u8 = undefined;
-        std.debug.print("{s}\n", .{prompt});
+        std.debug.print("{s}", .{prompt});
         var temp = try r.readUntilDelimiterOrEof(&buf, '\n');
         command = temp.?;
         var lexer = Lexer.init(command);
         var result = try context.process_command(&lexer);
         _ = result;
+        if (context.quit) {
+            notquit = false;
+            //context.deinit();
+        }
         //std.debug.print("{any}\n", .{context.rules_table});
     }
-    context.show_rules();
 }

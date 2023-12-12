@@ -8,7 +8,8 @@ const sym = Zoq.sym;
 const fun = Zoq.fun;
 //var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-const allocator = arena.allocator();
+var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+const allocator = gpa.allocator();
 const swap_expr1 = Zoq.swap_expr;
 
 const keywordset = [_]Token{
@@ -44,9 +45,8 @@ pub fn parseexpr(lexer: *Lexer, string_allocator: std.mem.Allocator) !Expression
                     var args: std.ArrayList(Expression) = std.ArrayList(Expression).init(allocator);
                     var close = lexer.nextIf(.close_paren);
                     if (close != null) {
-                        _ = try string_allocator.alloc(u8, 10);
-                        var fun_name = try string_allocator.dupe(u8, name.value);
-                        return Zoq.fun(fun_name, args.items);
+                        //var fun_name = try string_allocator.dupe(u8, name.value);
+                        return Zoq.fun(try string_allocator.dupe(u8, name.value), args.items);
                     }
                     var appen1 = try parseexpr(lexer, string_allocator);
                     try args.append(appen1);
@@ -58,16 +58,16 @@ pub fn parseexpr(lexer: *Lexer, string_allocator: std.mem.Allocator) !Expression
                     if (lexer.nextIf(.close_paren) == null) {
                         return error.ExpectedCloseParen;
                     }
-                    var fun_name = try string_allocator.dupe(u8, name.value);
-                    return Zoq.fun(fun_name, args.items);
+                    //var fun_name = try string_allocator.dupe(u8, name.value);
+                    return Zoq.fun(try string_allocator.dupe(u8, name.value), args.items);
                 } else {
-                    var sym_name = try string_allocator.dupe(u8, name.value);
-                    return Zoq.sym(sym_name);
+                    //var sym_name = try string_allocator.dupe(u8, name.value);
+                    return Zoq.sym(try string_allocator.dupe(u8, name.value));
                 }
             },
             .number => {
-                var sym_name = try string_allocator.dupe(u8, name.value);
-                return Zoq.sym(sym_name);
+                //var sym_name = try string_allocator.dupe(u8, name.value);
+                return Zoq.sym(try string_allocator.dupe(u8, name.value));
             },
             else => {
                 return error.NotAnExpression;
@@ -118,6 +118,7 @@ pub const Context = struct {
     rules_table: std.StringArrayHashMap(Rule),
     current_expr: ?Expression,
     alloctor: std.mem.Allocator,
+    quit: bool = false,
 
     pub fn init(alloctor: std.mem.Allocator) Context {
         return .{ .rules_table = std.StringArrayHashMap(Rule).init(alloctor), .current_expr = null, .alloctor = alloctor };
@@ -138,7 +139,10 @@ pub const Context = struct {
 
     pub fn deinit(self: *Context) void {
         var iter = self.rules_table.iterator();
-        while (iter.next()) |kv| self.alloctor.free(kv.key_ptr.*);
+        while (iter.next()) |kv| {
+            self.alloctor.free(kv.key_ptr.*);
+            //std.debug.print("{s}\n", .{kv.value_ptr.*});
+        }
         self.rules_table.deinit();
     }
 
@@ -158,14 +162,12 @@ pub const Context = struct {
         }
     }
 
-    //FIX: This function has errors in both the rule and apply switches. The StringHashMap contaminates the data stored and fails to retrieve it. This is probably due to pointer magic.
     pub fn process_command(self: *Context, lexer: *Lexer) !void {
         var peeked = lexer.next();
 
         switch (peeked.token_type) {
             .Rule => {
                 var rule_name = lexer.nextIf(.identifier);
-                std.debug.print("rule?: {any}\n", .{rule_name});
                 if (self.get_rule(rule_name.?.value) != null) {
                     return error.DuplicateRule;
                 }
@@ -183,7 +185,8 @@ pub const Context = struct {
                     return error.AlreadyShapingExpression;
                 }
                 var expr = try parseexpr(lexer, self.alloctor);
-                std.debug.print("Shaping: {any}\n", .{expr});
+                std.debug.print("Shaping expression: {any}\n", .{expr});
+                std.debug.print("\n", .{});
                 self.set_current_expr(expr);
             },
             .Apply => {
@@ -194,13 +197,9 @@ pub const Context = struct {
                 var rule_name: []const u8 = name.?.value;
                 std.debug.print("applying rule: {s}\n", .{rule_name});
                 var rule = self.rules_table.get(rule_name);
-                var key = self.rules_table.getKey(rule_name);
-                std.debug.print("got rule: {any}\n", .{rule});
-                std.debug.print("got the key: {any}\n", .{key});
-                self.show_rules();
-                const new_expr = try rule.?.apply(self.current_expr.?);
-                std.debug.print("new expression: {any}\n", .{new_expr});
-                self.set_current_expr(new_expr);
+                self.current_expr = try rule.?.apply(self.current_expr.?);
+                std.debug.print("new expression: {any}\n", .{self.current_expr});
+                std.debug.print("\n", .{});
                 if (rule == null) {
                     return error.RuleNotFound;
                 }
@@ -209,10 +208,16 @@ pub const Context = struct {
                 std.debug.print("current expression: {any}\n", .{self.current_expr});
                 if (self.get_current_expr() != null) {
                     std.debug.print("done shaping: {any}\n", .{self.current_expr});
+                    std.debug.print("\n", .{});
+                    //self.current_expr.?.deinit();
                     self.set_current_expr(null);
                 } else {
                     return error.NoShapingInProgress;
                 }
+            },
+            .Quit => {
+                self.quit = true;
+                self.deinit();
             },
             else => {
                 std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ peeked, keywordset });

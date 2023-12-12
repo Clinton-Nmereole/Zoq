@@ -50,6 +50,30 @@ This is a image should show the functionality of the Zoq REPL:
 <img src="./assets/zoq_test.png" alt="Zoq REPL"/>
 </div>
 
+### Zoq Logic
+The program starts by letting the user enter rules by starting with the 'rule' keyword followed by the name of the rule and then the rule itself.\
+```console
+rule add add(x, y) = add(y, x)
+```
+The above creates a rule add and the rule states that add(x,y) is equivalent to add(y, x).\
+Next using the shape keyword, you can enter the expression you wish transformed. 
+```console
+shape add add(a, b)
+```
+Once this is done you can use the apply keyword with the name of the rule you wish to apply\
+```console
+apply add
+```
+This will transform the expression 'add(a, b)' to 'add(b, a)'. When you are finished with the expression simply type 'done'.\
+This tells the program you are done transforming the expression and it will print the current expression after all transformations have been applied.\
+Lastly you can type 'quit' to exit the program.
+
+
+
+
+
+
+
 
 ## References
 Coq: [https://coq.inria.fr/](https://coq.inria.fr/)\
