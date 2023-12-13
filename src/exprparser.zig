@@ -30,7 +30,7 @@ pub fn parsesym(lexer: *Lexer) !Expression {
 
 pub fn applyswap(a: Expression) !Expression {
     if (a.isFunction()) {
-        return swap_expr1.apply(a);
+        return swap_expr1.apply_all(a);
     }
     return error.NotAFunction;
 }
@@ -195,10 +195,10 @@ pub const Context = struct {
                 }
                 var name = lexer.nextIf(.identifier);
                 var rule_name: []const u8 = name.?.value;
-                std.debug.print("applying rule: {s}\n", .{rule_name});
+                std.debug.print(" applying rule: {s}\n", .{rule_name});
                 var rule = self.rules_table.get(rule_name);
-                self.current_expr = try rule.?.apply(self.current_expr.?);
-                std.debug.print("new expression: {any}\n", .{self.current_expr});
+                self.current_expr = try rule.?.apply_all(self.current_expr.?, self.alloctor);
+                std.debug.print(" new expression: {any}\n", .{self.current_expr});
                 std.debug.print("\n", .{});
                 if (rule == null) {
                     return error.RuleNotFound;
@@ -217,7 +217,7 @@ pub const Context = struct {
             },
             .Quit => {
                 self.quit = true;
-                self.deinit();
+                //self.deinit();
             },
             else => {
                 std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ peeked, keywordset });

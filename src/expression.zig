@@ -13,6 +13,7 @@ pub const Expression = union(enum) {
     symbol: struct { str: []const u8 },
     function: struct { name: []const u8, args: []const Expression },
 
+    //This is wrong. It tries to use the gpa to free memory for an expression that might not contain strings allocated by the gpa allocator.
     pub fn deinit(self: *Expression) void {
         switch (self.*) {
             .symbol => |s| {
@@ -144,76 +145,76 @@ pub const Expression = union(enum) {
         };
     }
 
-    //put either a symbol or a function name in a hashmap
-    pub fn putinMap(self: Expression, other: Expression, amap: *stringmap) !void {
-        return switch (self) {
-            .symbol => |s| switch (other) {
-                .symbol => |_| if (!amap.contains(s.str)) {
-                    try amap.put(s.str, other);
-                } else {
-                    var entry = amap.get(s.str).?;
-                    if (!entry.eql(other)) {
-                        if (amap.remove(s.str)) {
-                            return NoMatch.NO_MATCH;
-                        }
-                    }
-                },
-                .function => |_| if (!amap.contains(s.str)) {
-                    try amap.put(s.str, other);
-                } else {
-                    var entry = amap.get(s.str).?;
-                    if (!entry.eql(other)) {
-                        if (amap.remove(s.str)) {
-                            return NoMatch.NO_MATCH;
-                        }
-                    }
-                },
-            },
-            .function => |f| switch (other) {
-                .symbol => |_| if (!amap.contains(f.name)) {
-                    try amap.put(f.name, other);
-                } else {
-                    var entry = amap.get(f.name).?;
-                    if (!entry.eql(other)) {
-                        if (amap.remove(f.name)) {
-                            return NoMatch.NO_MATCH;
-                        }
-                    }
-                },
-                .function => |_| {
-                    //try amap.put(f.name, other);
-                    if (f.args.len == other.function.args.len) {
-                        for (f.args, other.function.args, 0..) |_, _, i| {
-                            try f.args[i].putinMap(other.function.args[i], amap);
-                        }
-                    } else {
-                        return NoMatch.NO_MATCH;
-                    }
-                },
-            },
-        };
-    }
+    pub fn pattern_match(self: Expression, other: Expression, alloctor: std.mem.Allocator) !?std.StringHashMap(Expression) {
+        var mymap = stringmap.init(alloctor);
 
-    //Correctly pattern match variables if they pass the 'isPattern' condition.
-    pub fn patternMatch(self: Expression, other: Expression) !void {
-        var mymap = stringmap.init(allocator);
-        defer mymap.deinit();
-        if (self.isPattern(other)) {
-            try self.putinMap(other, &mymap);
-            var iter = mymap.iterator();
-            while (iter.next()) |entry| {
-                std.debug.print("{s} => {s}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+        const Fns = struct {
+            fn match_impl(self2: Expression, other2: Expression, amap: *stringmap) !bool {
+                return switch (self2) {
+                    .symbol => |s| switch (other2) {
+                        .symbol => |_| {
+                            if (!amap.contains(s.str)) {
+                                try amap.put(s.str, other2);
+                            } else {
+                                var entry = amap.get(s.str).?;
+                                if (!entry.eql(other2)) {
+                                    if (amap.remove(s.str)) {
+                                        return false;
+                                    }
+                                }
+                            }
+                            return true;
+                        },
+                        .function => |_| {
+                            if (!amap.contains(s.str)) {
+                                try amap.put(s.str, other2);
+                            } else {
+                                var entry = amap.get(s.str).?;
+                                if (!entry.eql(other2)) {
+                                    if (amap.remove(s.str)) {
+                                        return false;
+                                    }
+                                }
+                            }
+                            return true;
+                        },
+                    },
+                    .function => |f| switch (other2) {
+                        .symbol => |_| {
+                            try amap.put(f.name, other2);
+                            return true;
+                        },
+                        .function => |f2| {
+                            if (std.mem.eql(u8, f.name, f2.name) and f.args.len == f2.args.len) {
+                                for (0..f.args.len) |i| {
+                                    if (!try @This().match_impl(f.args[i], f2.args[i], amap)) {
+                                        return false;
+                                    }
+                                }
+                                return true;
+                            } else {
+                                return false;
+                            }
+                        },
+                    },
+                };
             }
+        };
+
+        if (try Fns.match_impl(self, other, &mymap)) {
+            return mymap;
         } else {
-            return NoMatch.NO_MATCH;
+            return null;
         }
     }
 };
 
+//NOTE: this function might later take in an allocator in order to use allocator.dupe so that expression always hold copies of strings and not pointers
 pub inline fn sym(symbol_name: []const u8) Expression {
     return Expression{ .symbol = .{ .str = symbol_name } };
 }
 
+//NOTE: this function might later take in an allocator in order to use allocator.dupe so that expression always hold copies of strings and not pointers
 pub inline fn fun(name: []const u8, args: []const Expression) Expression {
     return Expression{ .function = .{ .name = name, .args = args } };
 }
@@ -225,6 +226,36 @@ fn append_expr(
     var newlist = list;
     newlist = newlist ++ @as([]const Expression, &.{expr});
     return newlist;
+}
+
+pub fn substitute_bindings(expr: Expression, bindings: std.StringHashMap(Expression)) !Expression {
+    var new_name: []const u8 = "";
+    return switch (expr) {
+        .symbol => |s| {
+            var value = bindings.get(s.str);
+            if (value != null) {
+                return value.?;
+            } else {
+                return expr;
+            }
+        },
+        .function => |f| {
+            var value = bindings.get(f.name);
+            if (value != null) {
+                new_name = switch (bindings.get(f.name).?) {
+                    .symbol => |s| s.str,
+                    else => f.name,
+                };
+            } else {
+                new_name = f.name;
+            }
+            var new_args = try allocator.alloc(Expression, f.args.len);
+            for (f.args, 0..) |arg, i| {
+                new_args[i] = try substitute_bindings(arg, bindings);
+            }
+            return Expression{ .function = .{ .name = new_name, .args = new_args } };
+        },
+    };
 }
 
 //A rule is a struct that has an expression and its equivalent
@@ -261,65 +292,25 @@ pub const Rule = struct {
     }
 
     //Apply a rule to an expression
-    pub fn apply(self: Rule, expr: Expression) !Expression {
-        if (self.expression.isPattern(expr)) {
-            var amap = stringmap.init(allocator);
-            defer amap.deinit();
-            var temp = self.expression.putinMap(expr, &amap) catch return NoMatch.NO_MATCH; // this is a function that put inserts a (string, Expression) pair
-            _ = temp;
-            var iter = amap.iterator(); // make the map an iterator
-            const arg_len = self.equivalent.function.args.len;
-            return switch (self.expression) {
-                .symbol => |_| switch (expr) {
-                    .symbol => |_| self.equivalent,
-                    .function => |_| {
-                        if (self.equivalent.isFunction()) {
-                            var args = allocator.alloc(Expression, self.equivalent.function.args.len) catch return NoMatch.NO_MATCH;
-                            for (self.equivalent.function.args, 0..) |arg, i| {
-                                if (arg.isSymbol() and arg.eql(self.expression)) {
-                                    args[i] = expr;
-                                } else {
-                                    args[i] = arg;
-                                }
-                            }
-                            var new_expr = Expression{ .function = .{ .name = self.equivalent.function.name, .args = args } };
-                            return new_expr;
-                        } else {
-                            unreachable;
-                        }
-                    },
-                },
-                .function => |_| switch (expr) {
-                    .symbol => unreachable,
-                    .function => |_| {
-                        var arg_arr = allocator.alloc(Expression, arg_len) catch return NoMatch.NO_MATCH;
-                        var k: usize = 0;
-                        while (iter.next()) |entry| {
-                            if (self.expression.isPattern(entry.value_ptr.*)) {
-                                arg_arr[k] = try self.apply(entry.value_ptr.*);
-                            } else {
-                                arg_arr[k] = entry.value_ptr.*;
-                            }
-                            //std.debug.print("{}\n", .{sub});
 
-                            if (k < arg_len - 1) {
-                                k += 1;
-                            }
-                        }
-                        const arg_slice = arg_arr[0..arg_len];
-
-                        var new_expr = Expression{ .function = .{ .name = self.equivalent.function.name, .args = arg_slice } };
-                        return new_expr;
-                    },
+    pub fn apply_all(self: *Rule, expr: Expression, alloctor: std.mem.Allocator) !Expression {
+        var bindings = try self.expression.pattern_match(expr, alloctor);
+        if (bindings != null) {
+            return substitute_bindings(self.equivalent, bindings.?);
+        } else {
+            switch (expr) {
+                .symbol => |_| {
+                    return expr;
                 },
-            };
-        }
-        for (expr.function.args) |arg| {
-            if (self.expression.isPattern(arg)) {
-                return try self.apply(arg);
+                .function => |f| {
+                    var new_args = try alloctor.alloc(Expression, f.args.len);
+                    for (f.args, 0..) |arg, i| {
+                        new_args[i] = try self.apply_all(arg, alloctor);
+                    }
+                    return Expression{ .function = .{ .name = f.name, .args = new_args } };
+                },
             }
         }
-        return NoMatch.NO_MATCH;
     }
 };
 
@@ -358,6 +349,18 @@ pub const power_expr = Rule{
     .expression = fun("power", &.{ sym("a"), sym("n") }),
     .equivalent = fun("mult", &.{ sym("a"), fun("power", &.{ sym("a"), sym("n-1") }) }),
 };
+
+pub fn main() !void {
+    var alloctor = allocator;
+    var swap_expr1 = Rule{
+        .expression = fun("swap", &.{fun("pair", &.{ sym("a"), sym("b") })}),
+        .equivalent = fun("pair", &.{ sym("b"), sym("a") }),
+    };
+
+    var expr1 = fun("foo", &.{fun("swap", &.{fun("pair", &.{ sym("x"), sym("y") })})});
+    var applied = try swap_expr1.apply_all(expr1, alloctor);
+    std.debug.print("{any}\n", .{applied});
+}
 
 test "Symbol Equality" {
     try std.testing.expectEqual(sym("a"), sym("a"));

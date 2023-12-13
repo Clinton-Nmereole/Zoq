@@ -19,26 +19,29 @@ pub fn main() !void {
     const allocator = arena.allocator();
 
     var prompt: []const u8 = "Zoq::> ";
-
+    var default_prompt: []const u8 = "Zoq::> ";
+    var shape_prompt: []const u8 = " > ";
     var context: Context = Context.init(allocator);
     //defer context.deinit();
-    var notquit = true;
-    while (notquit) {
+    //var notquit = true;
+    while (context.quit == false) {
         var r = std.io.getStdIn().reader();
         var w = std.io.getStdOut().writer();
         _ = w;
         var buf: [4096]u8 = undefined;
         var command: []const u8 = undefined;
+        if (context.current_expr != null) {
+            prompt = shape_prompt;
+        } else {
+            prompt = default_prompt;
+        }
         std.debug.print("{s}", .{prompt});
         var temp = try r.readUntilDelimiterOrEof(&buf, '\n');
         command = temp.?;
         var lexer = Lexer.init(command);
         var result = try context.process_command(&lexer);
         _ = result;
-        if (context.quit) {
-            notquit = false;
-            //context.deinit();
-        }
+
         //std.debug.print("{any}\n", .{context.rules_table});
     }
 }

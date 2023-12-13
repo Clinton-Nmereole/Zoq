@@ -69,12 +69,6 @@ This tells the program you are done transforming the expression and it will prin
 Lastly you can type 'quit' to exit the program.
 
 
-
-
-
-
-
-
 ## References
 Coq: [https://coq.inria.fr/](https://coq.inria.fr/)\
 Noq: [https://github.com/tsoding/Noq](https://github.com/tsoding/Noq)\
