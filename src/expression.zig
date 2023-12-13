@@ -294,6 +294,13 @@ pub const Rule = struct {
     //Apply a rule to an expression
 
     pub fn apply_all(self: *Rule, expr: Expression, alloctor: std.mem.Allocator) !Expression {
+        if (self.expression.isSymbol() and self.equivalent.isSymbol() and expr.isFunction()) {
+            var bind = try self.expression.pattern_match(expr, alloctor);
+            if (bind != null) {
+                return Expression{ .function = .{ .name = self.equivalent.symbol.str, .args = expr.function.args } };
+            }
+        }
+
         var bindings = try self.expression.pattern_match(expr, alloctor);
         if (bindings != null) {
             return substitute_bindings(self.equivalent, bindings.?);

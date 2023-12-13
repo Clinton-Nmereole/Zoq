@@ -41,6 +41,7 @@ pub const TokenType = union(enum) {
     Apply,
     Done,
     Rule,
+    Undo,
 
     //symbols
     identifier,
@@ -73,6 +74,7 @@ pub fn keyword(name: []const u8) ?TokenType {
         apply,
         done,
         rule,
+        undo,
     };
     const cmd = std.meta.stringToEnum(case, name) orelse return null;
 
@@ -82,6 +84,7 @@ pub fn keyword(name: []const u8) ?TokenType {
         .apply => return TokenType{ .Apply = {} },
         .done => return TokenType{ .Done = {} },
         .rule => return TokenType{ .Rule = {} },
+        .undo => return TokenType{ .Undo = {} },
     }
 }
 

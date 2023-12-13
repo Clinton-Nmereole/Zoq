@@ -116,12 +116,13 @@ pub fn bufferedWriter(stream: anytype) std.io.BufferedWriter(4096, @TypeOf(strea
 
 pub const Context = struct {
     rules_table: std.StringArrayHashMap(Rule),
+    expression_list: std.ArrayList(Expression),
     current_expr: ?Expression,
     alloctor: std.mem.Allocator,
     quit: bool = false,
 
     pub fn init(alloctor: std.mem.Allocator) Context {
-        return .{ .rules_table = std.StringArrayHashMap(Rule).init(alloctor), .current_expr = null, .alloctor = alloctor };
+        return .{ .rules_table = std.StringArrayHashMap(Rule).init(alloctor), .current_expr = null, .alloctor = alloctor, .expression_list = std.ArrayList(Expression).init(alloctor) };
     }
 
     pub fn get_rules_table(self: Context) std.StringArrayHashMap(Rule) {
@@ -197,6 +198,7 @@ pub const Context = struct {
                 var rule_name: []const u8 = name.?.value;
                 std.debug.print(" applying rule: {s}\n", .{rule_name});
                 var rule = self.rules_table.get(rule_name);
+                self.expression_list.append(self.current_expr.?) catch return error.OutOfMemory;
                 self.current_expr = try rule.?.apply_all(self.current_expr.?, self.alloctor);
                 std.debug.print(" new expression: {any}\n", .{self.current_expr});
                 std.debug.print("\n", .{});
@@ -218,6 +220,14 @@ pub const Context = struct {
             .Quit => {
                 self.quit = true;
                 //self.deinit();
+            },
+            .Undo => {
+                if (self.expression_list.items.len == 0) {
+                    return error.NoExpressionToUndo;
+                }
+                self.current_expr = self.expression_list.pop();
+                std.debug.print("undo shaping: {any}\n", .{self.current_expr});
+                std.debug.print("\n", .{});
             },
             else => {
                 std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ peeked, keywordset });
