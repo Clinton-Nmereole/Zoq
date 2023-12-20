@@ -35,6 +35,13 @@ pub fn isIdentifierChar(char: u8) bool {
 }
 
 pub const TokenType = union(enum) {
+    //operators
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    Power,
+
     //keywords
     Quit,
     Shape,
@@ -156,6 +163,26 @@ pub const Lexer = struct {
             '=' => Token{
                 .token_type = .equals,
                 .value = "=",
+            },
+            '+' => Token{
+                .token_type = .Plus,
+                .value = "+",
+            },
+            '-' => Token{
+                .token_type = .Minus,
+                .value = "-",
+            },
+            '*' => Token{
+                .token_type = .Multiply,
+                .value = "*",
+            },
+            '/' => Token{
+                .token_type = .Divide,
+                .value = "/",
+            },
+            '^' => Token{
+                .token_type = .Power,
+                .value = "^",
             },
             ',' => Token{
                 .token_type = .comma,

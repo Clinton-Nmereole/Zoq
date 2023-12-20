@@ -6,12 +6,35 @@ const tokenize = std.mem.tokenizeAny;
 
 pub const NoMatch = error{NO_MATCH};
 
+pub const UniaryOperator = enum {
+    plus,
+    minus,
+    multiply,
+    divide,
+    power,
+    mod,
+    negate,
+
+    pub fn print(self: UniaryOperator) void {
+        switch (self) {
+            .plus => std.debug.print("+", .{}),
+            .minus => std.debug.print("-", .{}),
+            .multiply => std.debug.print("*", .{}),
+            .divide => std.debug.print("/", .{}),
+            .power => std.debug.print("^", .{}),
+            .mod => std.debug.print("%", .{}),
+            .negate => std.debug.print("~", .{}),
+        }
+    }
+};
+
 //Declare a tagged union called an expression
 //An expression can be a symbol, a function.
 //A function has a name and a list of arguments
 pub const Expression = union(enum) {
     symbol: struct { str: []const u8 },
     function: struct { name: []const u8, args: []const Expression },
+    statement: struct { lhs: *Expression, rhs: *Expression, operator: UniaryOperator },
 
     //This is wrong. It tries to use the gpa to free memory for an expression that might not contain strings allocated by the gpa allocator.
     pub fn deinit(self: *Expression) void {
@@ -22,6 +45,10 @@ pub const Expression = union(enum) {
             .function => |f| {
                 allocator.free(f.name);
                 allocator.free(f.args);
+            },
+            .statement => |s| {
+                s.lhs.deinit();
+                s.rhs.deinit();
             },
         }
     }
@@ -41,6 +68,11 @@ pub const Expression = union(enum) {
                     arg.print();
                 }
                 std.debug.print(")", .{});
+            },
+            .statement => |s| {
+                s.lhs.print();
+                s.operator.print();
+                s.rhs.print();
             },
         }
     }
@@ -68,6 +100,19 @@ pub const Expression = union(enum) {
                 }
                 try writer.print(")", .{});
             },
+            .statement => |s| {
+                try s.lhs.format("", .{}, writer);
+                switch (s.operator) {
+                    .plus => try writer.print(" + ", .{}),
+                    .minus => try writer.print(" - ", .{}),
+                    .multiply => try writer.print(" * ", .{}),
+                    .divide => try writer.print(" / ", .{}),
+                    .power => try writer.print(" ^ ", .{}),
+                    .mod => try writer.print(" % ", .{}),
+                    .negate => try writer.print(" ~ ", .{}),
+                }
+                try s.rhs.format("", .{}, writer);
+            },
         }
     }
 
@@ -87,6 +132,14 @@ pub const Expression = union(enum) {
         };
     }
 
+    // return true if the Expression is a statement
+    pub fn isStatement(self: Expression) bool {
+        return switch (self) {
+            .statement => true,
+            else => false,
+        };
+    }
+
     // return true if the two expressions are equal
     pub fn eql(self: Expression, other: Expression) bool {
         return switch (self) {
@@ -96,6 +149,10 @@ pub const Expression = union(enum) {
             },
             .function => |f| switch (other) {
                 .function => |f2| std.meta.eql(f.name, f2.name) and eqlSlice(f.args, f2.args),
+                else => false,
+            },
+            .statement => |s| switch (other) {
+                .statement => |s2| eql(s.lhs.*, s2.lhs.*) and eql(s.rhs.*, s2.rhs.*) and std.meta.eql(s.operator, s2.operator),
                 else => false,
             },
         };
@@ -110,10 +167,17 @@ pub const Expression = union(enum) {
                 .symbol => |s| switch (b) {
                     .symbol => |s2| if (std.mem.eql(u8, s.str, s2.str)) {},
                     .function => return false,
+                    .statement => return false,
                 },
                 .function => |f| switch (b) {
                     .symbol => return false,
                     .function => |f2| if (std.mem.eql(u8, f.name, f2.name) and eqlSlice(f.args, f2.args)) {},
+                    .statement => return false,
+                },
+                .statement => |s| switch (b) {
+                    .statement => |s2| if (eql(s.lhs.*, s2.lhs.*) and eql(s.rhs.*, s2.rhs.*) and std.meta.eql(s.operator, s2.operator)) {},
+                    .function => return false,
+                    .symbol => return false,
                 },
             }
         }
@@ -124,6 +188,7 @@ pub const Expression = union(enum) {
         return switch (self) {
             .symbol => 1,
             .function => |f| f.args.len + 1,
+            .statement => |s| s.lhs.getlen() + s.rhs.getlen() + 1,
         };
     }
 
@@ -178,6 +243,19 @@ pub const Expression = union(enum) {
                             }
                             return true;
                         },
+                        .statement => |_| {
+                            if (!amap.contains(s.str)) {
+                                try amap.put(s.str, other2);
+                            } else {
+                                var entry = amap.get(s.str).?;
+                                if (!entry.eql(other2)) {
+                                    if (amap.remove(s.str)) {
+                                        return false;
+                                    }
+                                }
+                            }
+                            return true;
+                        },
                     },
                     .function => |f| switch (other2) {
                         .symbol => |_| {
@@ -195,6 +273,75 @@ pub const Expression = union(enum) {
                             } else {
                                 return false;
                             }
+                        },
+                        .statement => |_| {
+                            try amap.put(f.name, other2);
+                            return true;
+                        },
+                    },
+                    .statement => |st| switch (other2) {
+                        .symbol => |_| {
+                            return false;
+                        },
+                        .function => |_| {
+                            return false;
+                        },
+                        .statement => |st2| {
+                            switch (st.lhs.*) {
+                                .symbol => |s| {
+                                    if (!amap.contains(s.str)) {
+                                        try amap.put(s.str, st2.lhs.*);
+                                    } else {
+                                        var entry = amap.get(s.str).?;
+                                        if (!entry.eql(st2.lhs.*)) {
+                                            if (amap.remove(s.str)) {
+                                                return false;
+                                            }
+                                        }
+                                    }
+                                },
+                                .function => |f| {
+                                    if (!amap.contains(f.name)) {
+                                        try amap.put(f.name, st2.lhs.*);
+                                    } else {
+                                        var entry = amap.get(f.name).?;
+                                        if (!entry.eql(st2.lhs.*)) {
+                                            if (amap.remove(f.name)) {
+                                                return false;
+                                            }
+                                        }
+                                    }
+                                },
+                                else => return false,
+                            }
+                            switch (st.rhs.*) {
+                                .symbol => |s| {
+                                    if (!amap.contains(s.str)) {
+                                        try amap.put(s.str, st2.rhs.*);
+                                    } else {
+                                        var entry = amap.get(s.str).?;
+                                        if (!entry.eql(st2.rhs.*)) {
+                                            if (amap.remove(s.str)) {
+                                                return false;
+                                            }
+                                        }
+                                    }
+                                },
+                                .function => |f| {
+                                    if (!amap.contains(f.name)) {
+                                        try amap.put(f.name, st2.rhs.*);
+                                    } else {
+                                        var entry = amap.get(f.name).?;
+                                        if (!entry.eql(st2.rhs.*)) {
+                                            if (amap.remove(f.name)) {
+                                                return false;
+                                            }
+                                        }
+                                    }
+                                },
+                                else => return false,
+                            }
+                            return true;
                         },
                     },
                 };
@@ -254,6 +401,11 @@ pub fn substitute_bindings(expr: Expression, bindings: std.StringHashMap(Express
                 new_args[i] = try substitute_bindings(arg, bindings);
             }
             return Expression{ .function = .{ .name = new_name, .args = new_args } };
+        },
+        .statement => |st| {
+            var lhs = try substitute_bindings(st.lhs.*, bindings);
+            var rhs = try substitute_bindings(st.rhs.*, bindings);
+            return Expression{ .statement = .{ .lhs = &lhs, .rhs = &rhs, .operator = UniaryOperator.plus } };
         },
     };
 }
@@ -315,6 +467,11 @@ pub const Rule = struct {
                         new_args[i] = try self.apply_all(arg, alloctor);
                     }
                     return Expression{ .function = .{ .name = f.name, .args = new_args } };
+                },
+                .statement => |st| {
+                    var lhs = try self.apply_all(st.lhs.*, alloctor);
+                    var rhs = try self.apply_all(st.rhs.*, alloctor);
+                    return Expression{ .statement = .{ .lhs = &lhs, .rhs = &rhs, .operator = UniaryOperator.plus } };
                 },
             }
         }
