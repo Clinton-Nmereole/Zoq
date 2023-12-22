@@ -1,5 +1,6 @@
 const std = @import("std");
 const Token = @import("tokenizer.zig").Token;
+const TokenType = @import("tokenizer.zig").TokenType;
 const Lexer = @import("tokenizer.zig").Lexer;
 const Expression = @import("expression.zig").Expression;
 const Zoq = @import("expression.zig");
@@ -18,6 +19,14 @@ const keywordset = [_]Token{
     Token{ .token_type = .Rule, .value = "rule" },
     Token{ .token_type = .Quit, .value = "quit" },
     Token{ .token_type = .Done, .value = "done" },
+};
+
+const operatorset = [_]TokenType{
+    .Plus,
+    .Minus,
+    .Multiply,
+    .Divide,
+    .Power,
 };
 
 pub fn parsesym(lexer: *Lexer) !Expression {
@@ -85,6 +94,22 @@ pub fn parseRule(lexer: *Lexer, string_allocator: std.mem.Allocator) !Rule {
     return .{
         .expression = rule_expr,
         .equivalent = rule_equiv,
+    };
+}
+
+pub fn parseStatement(lexer: *Lexer) !f64 {
+    var lhs = lexer.next();
+    var Op = lexer.nextIfIn(&operatorset);
+    var rhs = lexer.next();
+    var lhs2 = try lhs.floatify();
+    var rhs2 = try rhs.floatify();
+    return switch (Op.?.token_type) {
+        .Plus => lhs2 + rhs2,
+        .Minus => lhs2 - rhs2,
+        .Multiply => lhs2 * rhs2,
+        .Divide => lhs2 / rhs2,
+        .Power => std.math.pow(f64, lhs2, rhs2),
+        else => error.NotAnOperator,
     };
 }
 
@@ -228,6 +253,10 @@ pub const Context = struct {
                 self.current_expr = self.expression_list.pop();
                 std.debug.print("undo shaping: {any}\n", .{self.current_expr});
                 std.debug.print("\n", .{});
+            },
+            .Eval => {
+                var stat = try parseStatement(lexer);
+                std.debug.print("statement: {d:4}\n", .{stat});
             },
             else => {
                 std.debug.print("unexpected token: {any}, expected token in set: {any}\n", .{ peeked, keywordset });

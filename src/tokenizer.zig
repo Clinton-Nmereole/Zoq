@@ -49,6 +49,7 @@ pub const TokenType = union(enum) {
     Done,
     Rule,
     Undo,
+    Eval,
 
     //symbols
     identifier,
@@ -82,6 +83,7 @@ pub fn keyword(name: []const u8) ?TokenType {
         done,
         rule,
         undo,
+        eval,
     };
     const cmd = std.meta.stringToEnum(case, name) orelse return null;
 
@@ -92,12 +94,20 @@ pub fn keyword(name: []const u8) ?TokenType {
         .done => return TokenType{ .Done = {} },
         .rule => return TokenType{ .Rule = {} },
         .undo => return TokenType{ .Undo = {} },
+        .eval => return TokenType{ .Eval = {} },
     }
 }
 
 pub const Token = struct {
     token_type: TokenType,
     value: []const u8,
+
+    pub fn floatify(self: Token) !f64 {
+        if (self.token_type == .number) {
+            return std.fmt.parseFloat(f64, self.value);
+        }
+        return error.NotANumber;
+    }
 };
 
 pub const Lexer = struct {
@@ -221,9 +231,9 @@ pub const Lexer = struct {
                     .value = value,
                 };
             },
-            '0'...'9' => {
+            '0'...'9', '.' => {
                 const start = self.pos;
-                while (std.ascii.isDigit(self.ch)) self.read();
+                while (std.ascii.isDigit(self.ch) or self.ch == '.') self.read();
                 const value = self.buffer[start..self.pos];
                 self.read_pos = self.pos;
                 self.pos = self.pos - 1;
@@ -243,6 +253,15 @@ pub const Lexer = struct {
     pub fn nextIf(self: *Self, token_type: TokenType) ?Token {
         if (self.peek().token_type.iseql(token_type)) {
             return self.next();
+        }
+        return null;
+    }
+
+    pub fn nextIfIn(self: *Self, token_types: []const TokenType) ?Token {
+        for (token_types) |token_type| {
+            if (self.peek().token_type.iseql(token_type)) {
+                return self.next();
+            }
         }
         return null;
     }

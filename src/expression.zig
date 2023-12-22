@@ -410,6 +410,14 @@ pub fn substitute_bindings(expr: Expression, bindings: std.StringHashMap(Express
     };
 }
 
+//Make a statement. A statement has a lhs which is an expression, a right hand side that is and expression and an operator between them
+//Example: a + b
+pub const Statement = struct {
+    lhs: Expression,
+    rhs: Expression,
+    operator: UniaryOperator,
+};
+
 //A rule is a struct that has an expression and its equivalent
 //A rule enforces that the expression and equivalent are the same
 //i.e a + b ≡ b + a
