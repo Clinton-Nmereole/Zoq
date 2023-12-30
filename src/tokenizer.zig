@@ -41,6 +41,7 @@ pub const TokenType = union(enum) {
     Multiply,
     Divide,
     Power,
+    Modulo,
 
     //keywords
     Quit,
@@ -193,6 +194,10 @@ pub const Lexer = struct {
             '^' => Token{
                 .token_type = .Power,
                 .value = "^",
+            },
+            '%' => Token{
+                .token_type = .Modulo,
+                .value = "%",
             },
             ',' => Token{
                 .token_type = .comma,

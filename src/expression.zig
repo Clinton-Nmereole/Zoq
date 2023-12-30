@@ -4,8 +4,10 @@ const allocator = gpa.allocator();
 const stringmap = std.StringHashMap(Expression);
 const tokenize = std.mem.tokenizeAny;
 
+//Declare an error called NoMatch for when match fails
 pub const NoMatch = error{NO_MATCH};
 
+//Declare an enum called UniaryOperator to represent the 6 uniary operators
 pub const UniaryOperator = enum {
     plus,
     minus,
@@ -356,6 +358,8 @@ pub const Expression = union(enum) {
     }
 };
 
+//Helpful functions for working with expressions.
+
 //NOTE: this function might later take in an allocator in order to use allocator.dupe so that expression always hold copies of strings and not pointers
 pub inline fn sym(symbol_name: []const u8) Expression {
     return Expression{ .symbol = .{ .str = symbol_name } };
@@ -366,7 +370,7 @@ pub inline fn fun(name: []const u8, args: []const Expression) Expression {
     return Expression{ .function = .{ .name = name, .args = args } };
 }
 
-fn append_expr(
+pub fn append_expr(
     expr: Expression,
     list: []const Expression,
 ) []const Expression {
@@ -375,6 +379,7 @@ fn append_expr(
     return newlist;
 }
 
+//Functions for substituting bound variables from a StringHashMap.
 pub fn substitute_bindings(expr: Expression, bindings: std.StringHashMap(Expression)) !Expression {
     var new_name: []const u8 = "";
     return switch (expr) {
@@ -412,10 +417,50 @@ pub fn substitute_bindings(expr: Expression, bindings: std.StringHashMap(Express
 
 //Make a statement. A statement has a lhs which is an expression, a right hand side that is and expression and an operator between them
 //Example: a + b
+//Possible alternative to the statement struct in the expression tagged union.
 pub const Statement = struct {
     lhs: Expression,
     rhs: Expression,
     operator: UniaryOperator,
+
+    pub fn deinit(self: *Statement) void {
+        self.lhs.deinit();
+        self.rhs.deinit();
+    }
+
+    pub fn print(self: Statement) void {
+        self.lhs.print();
+        self.operator.print();
+        self.rhs.print();
+    }
+};
+
+pub fn isStatement(expr: FullExpression) bool {
+    return switch (expr) {
+        .statement => true,
+        else => false,
+    };
+}
+
+pub const FullExpression = union(enum) {
+    expression: Expression,
+    statement: Statement,
+};
+
+pub const TrueRule = struct {
+    expr: FullExpression,
+    equivalent: FullExpression,
+
+    pub fn deinit(self: *TrueRule) void {
+        self.expr.deinit();
+        self.equivalent.deinit();
+    }
+
+    pub fn print(self: TrueRule) void {
+        self.expr.print();
+        std.debug.print(" ≡ ", .{});
+        self.equivalent.print();
+    }
 };
 
 //A rule is a struct that has an expression and its equivalent

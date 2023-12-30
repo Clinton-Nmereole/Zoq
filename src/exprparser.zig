@@ -27,6 +27,7 @@ const operatorset = [_]TokenType{
     .Multiply,
     .Divide,
     .Power,
+    .Modulo,
 };
 
 pub fn parsesym(lexer: *Lexer) !Expression {
@@ -109,6 +110,7 @@ pub fn parseStatement(lexer: *Lexer) !f64 {
         .Multiply => lhs2 * rhs2,
         .Divide => lhs2 / rhs2,
         .Power => std.math.pow(f64, lhs2, rhs2),
+        .Modulo => @mod(lhs2, rhs2),
         else => error.NotAnOperator,
     };
 }
